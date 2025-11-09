@@ -137,6 +137,7 @@ public class Config {
     }
 
     public Boolean getWebEnabled() {
+        if (true) return false;
         if (this.config.contains("web.enabled")) {
             return this.config.getBoolean("web.enabled");
         }

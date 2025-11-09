@@ -18,7 +18,7 @@ public class MigrateDataCommand implements CommandExecutor {
     
     public MigrateDataCommand(Nascraft plugin) {
         this.plugin = plugin;
-        plugin.getCommand("migrate").setExecutor(this);
+        // plugin.getCommand("migrate").setExecutor(this); // TODO: Migrate to brigadier if this class is ever used
     }
 
     @Override

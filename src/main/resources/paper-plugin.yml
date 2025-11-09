@@ -1,0 +1,22 @@
+name: Nascraft
+version: $version
+main: me.bounser.nascraft.Nascraft
+api-version: 1.21
+authors: [ bounser ]
+description: Market valuations in minecraft
+folia-supported: true
+
+dependencies:
+  server:
+    Vault:
+      load: BEFORE
+      required: false
+    PlaceholderAPI:
+      load: BEFORE
+      required: false
+    AdvancedGUI:
+      load: BEFORE
+      required: false
+    DiscordSRV:
+      load: BEFORE
+      required: false
