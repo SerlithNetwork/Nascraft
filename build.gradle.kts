@@ -1,3 +1,5 @@
+import java.util.Locale
+
 plugins {
     java
     id("com.gradleup.shadow") version "9.2.2"
@@ -64,6 +66,11 @@ dependencies {
     compileOnly("commons-io:commons-io:2.14.0")
 }
 
+val assetsUrl = uri("https://github.com/Owen1212055/mc-assets/archive/refs/heads/main.zip")
+val assetsZip = layout.buildDirectory.file("mc-assets.zip")
+val assetsExtracted = layout.buildDirectory.dir("extracted-assets")
+val assetsProcessed = layout.buildDirectory.dir("processed-assets")
+
 val targetJavaVersion = 21
 java {
     val javaVersion = JavaVersion.toVersion(targetJavaVersion)
@@ -71,6 +78,55 @@ java {
     targetCompatibility = javaVersion
     if (JavaVersion.current() < javaVersion) {
         toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+}
+
+val downloadAssets by tasks.registering {
+    outputs.file(assetsZip)
+    doLast {
+        val zip = assetsZip.get().asFile
+        if (!zip.exists()) {
+            zip.outputStream().use { output ->
+                assetsUrl.toURL().openStream().use { input -> input.copyTo(output) }
+            }
+        }
+
+    }
+}
+
+val extractAssets by tasks.registering(Copy::class) {
+    dependsOn(downloadAssets)
+    from({ zipTree(assetsZip).matching { include("**/mc-assets-main/item-assets/*.png") } })
+    into(assetsExtracted)
+    eachFile {
+        this.relativePath = RelativePath(true, this.relativePath.segments.last())
+    }
+}
+
+val renameAssets by tasks.registering {
+    dependsOn(extractAssets)
+    outputs.dir(assetsProcessed)
+
+    doLast {
+        val inputDir = assetsExtracted.get().asFile
+        val outputDir = assetsProcessed.get().asFile
+        outputDir.mkdirs()
+
+        inputDir.walkTopDown().forEach { file ->
+            if (file.isFile) {
+                val relative = file.relativeTo(inputDir).path.lowercase(Locale.ROOT)
+                val targetFile = File(outputDir, relative)
+                targetFile.parentFile.mkdirs()
+                file.copyTo(targetFile, overwrite = true)
+            }
+        }
+    }
+}
+
+tasks.processResources {
+    dependsOn(renameAssets)
+    from(assetsProcessed) {
+        into("images/items")
     }
 }
 
@@ -83,6 +139,7 @@ tasks.compileJava {
 }
 
 tasks.build {
+    dependsOn(renameAssets)
     dependsOn("shadowJar")
 }
 
