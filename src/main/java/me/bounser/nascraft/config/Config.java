@@ -137,7 +137,6 @@ public class Config {
     }
 
     public Boolean getWebEnabled() {
-        if (true) return false;
         if (this.config.contains("web.enabled")) {
             return this.config.getBoolean("web.enabled");
         }
@@ -201,12 +200,12 @@ public class Config {
         } catch (IllegalArgumentException e) {
             Nascraft.getInstance().getLogger().warning("Error trying to recognize database type: " + this.config.getString("database.type").toUpperCase());
             Nascraft.getInstance().getLogger().warning("Is it a valid type of database?");
-            e.printStackTrace();
-            Nascraft.getInstance().getPluginLoader().disablePlugin((Plugin)Nascraft.getInstance());
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
+            Nascraft.getInstance().getServer().getPluginManager().disablePlugin(Nascraft.getInstance());
         }
         if (databaseType == null) {
             Nascraft.getInstance().getLogger().warning("DatabaseManager type not recognized: " + this.config.getString("database.type").toUpperCase());
-            Nascraft.getInstance().getPluginLoader().disablePlugin((Plugin)Nascraft.getInstance());
+            Nascraft.getInstance().getServer().getPluginManager().disablePlugin(Nascraft.getInstance());
         }
         return databaseType;
     }

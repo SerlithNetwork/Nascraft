@@ -80,6 +80,7 @@ public final class Nascraft extends JavaPlugin {
     private DataMigrationManager dataMigrationManager;
     
     private WebServerManager webServerManager;
+    private boolean firstTimeBoot = false;
 
     public static Nascraft getInstance() { return main; }
 
@@ -89,6 +90,10 @@ public final class Nascraft extends JavaPlugin {
     public void onLoad() {
         System.setProperty("org.jooq.no-logo", "true");
         System.setProperty("org.jooq.no-tips", "true");
+
+        if (!this.getDataFolder().exists()) {
+            this.firstTimeBoot = true;
+        }
     }
 
     @Override
@@ -116,12 +121,16 @@ public final class Nascraft extends JavaPlugin {
         Plugin AGUI = Bukkit.getPluginManager().getPlugin("AdvancedGUI");
 
         if (AGUI == null || !AGUI.isEnabled()) {
-            getLogger().warning("AdvancedGUI is not installed! You won't have graphs in-game without it!");
-            getLogger().warning("Learn more about AdvancedGUI here: https://www.spigotmc.org/resources/83636/");
+            if (this.firstTimeBoot) {
+                // Uses ProtocolLib and is closed source, I won't be installing this anytime soon
+                this.getLogger().warning("AdvancedGUI is not installed! You won't have graphs in-game without it!");
+                this.getLogger().warning("Learn more about AdvancedGUI here: https://www.spigotmc.org/resources/83636/");
+                this.getLogger().warning("You won't see this message again!");
+            }
         } else {
             if (config.getCheckResources()) checkResources();
             LayoutModifier.getInstance();
-            if (!Bukkit.getPluginManager().getPlugin("AdvancedGUI").getDescription().getVersion().equals(AGUI_VERSION))
+            if (!AGUI.getPluginMeta().getVersion().equals(AGUI_VERSION))
                 getLogger().warning("This plugin was made using AdvancedGUI " + AGUI_VERSION + "! You may encounter errors on other versions");
         }
 
