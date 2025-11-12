@@ -86,6 +86,12 @@ public final class Nascraft extends JavaPlugin {
     public static NascraftAPI getAPI() { return apiInstance == null ? apiInstance = new NascraftAPI() : apiInstance; }
 
     @Override
+    public void onLoad() {
+        System.setProperty("org.jooq.no-logo", "true");
+        System.setProperty("org.jooq.no-tips", "true");
+    }
+
+    @Override
     public void onEnable() {
 
         main = this;
@@ -99,11 +105,6 @@ public final class Nascraft extends JavaPlugin {
         this.dataMigrationManager = new DataMigrationManager(this);
 
         setupMetrics();
-
-        new UpdateChecker(this, 108216).getVersion(version -> {
-            if (!getDescription().getVersion().equals(version))
-                getLogger().info("There is a new version available! Download it here: https://www.spigotmc.org/resources/108216/");
-        });
 
         this.adventure = BukkitAudiences.create(this);
 
@@ -210,7 +211,7 @@ public final class Nascraft extends JavaPlugin {
         }
         
         if (Config.getInstance().getDatabaseType() == DatabaseType.REDIS && Config.getInstance().getRedisUseFallback()) {
-            getLogger().info("Redis database with SQLite fallback is enabled");
+            getLogger().info("Redis database with H2 fallback is enabled");
         }
     }
 

@@ -1,214 +1,182 @@
 package me.bounser.nascraft.database.commands;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import me.bounser.nascraft.Nascraft;
+import org.jooq.DSLContext;
+import org.jooq.exception.DataAccessException;
+import org.jooq.impl.DSL;
+
 import java.util.HashMap;
 import java.util.UUID;
 
+import static me.biquaternions.nascraft.schema.public_.Tables.INTERESTS;
+import static me.biquaternions.nascraft.schema.public_.Tables.LOANS;
+
 public class Debt {
 
-    public static void increaseDebt(Connection connection, UUID uuid, double debt) {
-
+    public static void increaseDebt(DSLContext dsl, UUID uuid, double debt) {
         try {
-            String sql1 = "SELECT debt FROM loans WHERE uuid=?;";
-            PreparedStatement prep1 =  connection.prepareStatement(sql1);
-            prep1.setString(1, uuid.toString());
-            ResultSet resultSet = prep1.executeQuery();
-
-            if(resultSet.next()) {
-                String sql2 = "UPDATE loans SET debt=? WHERE uuid=?;";
-                PreparedStatement prep2 =  connection.prepareStatement(sql2);
-                prep2.setDouble(1, debt + resultSet.getDouble("debt"));
-                prep2.setString(2, uuid.toString());
-                prep2.executeUpdate();
-            } else {
-                String sql2 = "INSERT INTO loans (uuid, debt) VALUES (?,?);";
-                PreparedStatement prep2 =  connection.prepareStatement(sql2);
-                prep2.setString(1, uuid.toString());
-                prep2.setDouble(2, debt);
-                prep2.executeUpdate();
-            }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            dsl.insertInto(LOANS)
+                    .set(LOANS.UUID, uuid.toString())
+                    .set(LOANS.DEBT, debt)
+                    .onDuplicateKeyUpdate()
+                    .set(LOANS.DEBT, LOANS.DEBT.plus(debt))
+                    .execute();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static void decreaseDebt(Connection connection, UUID uuid, double debt) {
-
+    public static void decreaseDebt(DSLContext dsl, UUID uuid, double debt) {
         try {
-            String sql1 = "SELECT debt FROM loans WHERE uuid=?;";
-            PreparedStatement prep1 =  connection.prepareStatement(sql1);
-            prep1.setString(1, uuid.toString());
-            ResultSet resultSet = prep1.executeQuery();
+            dsl.transaction(configuration -> {
+                DSLContext ctx = DSL.using(configuration);
 
-            if(resultSet.next()) {
+                var record = ctx.select(LOANS.DEBT)
+                        .from(LOANS)
+                        .where(LOANS.UUID.eq(uuid.toString()))
+                        .fetchOne();
 
-                if (resultSet.getDouble("debt") - debt <= 0) {
-
-                    String sql2 = "DELETE FROM loans WHERE uuid=?;";
-                    PreparedStatement prep2 =  connection.prepareStatement(sql2);
-                    prep2.setString(1, uuid.toString());
-                    prep2.executeUpdate();
-
-                } else {
-                    String sql2 = "UPDATE loans SET debt=? WHERE uuid=?;";
-                    PreparedStatement prep2 =  connection.prepareStatement(sql2);
-                    prep2.setDouble(1, resultSet.getDouble("debt") - debt);
-                    prep2.setString(2, uuid.toString());
-                    prep2.executeUpdate();
+                if (record == null) {
+                    return;
                 }
-            }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+
+                double currentDebt = record.getValue(LOANS.DEBT);
+                double newDebt = currentDebt - debt;
+                if (newDebt < 0) {
+                    ctx.deleteFrom(LOANS)
+                            .where(LOANS.UUID.eq(uuid.toString()))
+                            .execute();
+                } else {
+                    ctx.update(LOANS)
+                            .set(LOANS.DEBT, newDebt)
+                            .where(LOANS.UUID.eq(uuid.toString()))
+                            .execute();
+                }
+            });
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static double getDebt(Connection connection, UUID uuid) {
-
+    public static double getDebt(DSLContext dsl, UUID uuid) {
         try {
-            String sql1 = "SELECT debt FROM loans WHERE uuid=?;";
-            PreparedStatement prep1 =  connection.prepareStatement(sql1);
-            prep1.setString(1, uuid.toString());
-            ResultSet resultSet = prep1.executeQuery();
+            var record = dsl.select(LOANS.DEBT)
+                    .from(LOANS)
+                    .where(LOANS.UUID.eq(uuid.toString()))
+                    .fetchOne();
 
-            if(resultSet.next()) {
-                return resultSet.getDouble("debt");
-            } else {
-                return 0;
+            if (record != null) {
+                return record.getValue(LOANS.DEBT);
             }
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
+        return 0;
     }
 
-    public static HashMap<UUID, Double> getUUIDAndDebt(Connection connection) {
+    public static HashMap<UUID, Double> getUUIDAndDebt(DSLContext dsl) {
         HashMap<UUID, Double> debtors = new HashMap<>();
-
         try {
-            String sql = "SELECT uuid, debt FROM loans WHERE debt > 0;";
+            var result = dsl.select(LOANS.UUID, LOANS.DEBT)
+                    .from(LOANS)
+                    .where(LOANS.DEBT.greaterThan(0.0))
+                    .fetch();
 
-            PreparedStatement prep = connection.prepareStatement(sql);
-            ResultSet rs = prep.executeQuery();
-
-            while (rs.next()) {
-                String uuidString = rs.getString("uuid");
-                UUID uuid = UUID.fromString(uuidString);
-                Double debt = rs.getDouble("debt");
-                debtors.put(uuid, debt);
+            for (var record : result) {
+                debtors.put(UUID.fromString(record.getValue(LOANS.UUID)), record.getValue(LOANS.DEBT));
             }
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
+        }
+        return debtors;
+    }
 
-            return debtors;
+    public static void addInterestPaid(DSLContext dsl, UUID uuid, Double interest) {
+        try {
+            dsl.transaction(configuration -> {
+                DSLContext ctx = DSL.using(configuration);
 
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+                var record = ctx.select(INTERESTS.PAID)
+                        .from(INTERESTS)
+                        .where(INTERESTS.UUID.eq(uuid.toString()))
+                        .fetchOne();
+
+                if (record != null) {
+                    ctx.update(INTERESTS)
+                            .set(INTERESTS.PAID, record.getValue(INTERESTS.PAID) + interest)
+                            .where(INTERESTS.UUID.eq(uuid.toString()))
+                            .execute();
+                } else {
+                    ctx.insertInto(INTERESTS)
+                            .set(INTERESTS.UUID, uuid.toString())
+                            .set(INTERESTS.PAID, interest)
+                            .execute();
+                }
+            });
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static void addInterestPaid(Connection connection, UUID uuid, Double interest) {
-
-        try {
-            String sql1 = "SELECT paid FROM interests WHERE uuid=?;";
-            PreparedStatement prep1 =  connection.prepareStatement(sql1);
-            prep1.setString(1, uuid.toString());
-            ResultSet resultSet = prep1.executeQuery();
-
-            if(resultSet.next()) {
-                String sql2 = "UPDATE interests SET paid=? WHERE uuid=?;";
-                PreparedStatement prep2 =  connection.prepareStatement(sql2);
-                prep2.setDouble(1, interest + resultSet.getDouble("paid"));
-                prep2.setString(2, uuid.toString());
-                prep2.executeUpdate();
-            } else {
-                String sql2 = "INSERT INTO interests (uuid, paid) VALUES (?,?);";
-                PreparedStatement prep2 =  connection.prepareStatement(sql2);
-                prep2.setString(1, uuid.toString());
-                prep2.setDouble(2, interest);
-                prep2.executeUpdate();
-            }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    public static HashMap<UUID, Double> getUUIDAndInterestsPaid(Connection connection) {
+    public static HashMap<UUID, Double> getUUIDAndInterestsPaid(DSLContext dsl) {
         HashMap<UUID, Double> payers = new HashMap<>();
-
         try {
-            String sql = "SELECT uuid, paid FROM interests;";
-
-            PreparedStatement prep = connection.prepareStatement(sql);
-            ResultSet rs = prep.executeQuery();
-
-            while (rs.next()) {
-                String uuidString = rs.getString("uuid");
-                UUID uuid = UUID.fromString(uuidString);
-                Double debt = rs.getDouble("paid");
-                payers.put(uuid, debt);
+            var result = dsl.select(INTERESTS.UUID, INTERESTS.PAID)
+                    .from(INTERESTS)
+                    .fetch();
+            for (var record : result) {
+                payers.put(UUID.fromString(record.getValue(INTERESTS.UUID)), record.getValue(INTERESTS.PAID));
             }
-
-            return payers;
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
+        return payers;
     }
 
-    public static double getInterestsPaid(Connection connection, UUID uuid) {
-
+    public static double getInterestsPaid(DSLContext dsl, UUID uuid) {
         try {
-            String sql = "SELECT paid FROM interests WHERE uuid=?;";
+            var record = dsl.select(INTERESTS.PAID)
+                    .from(INTERESTS)
+                    .where(INTERESTS.UUID.eq(uuid.toString()))
+                    .fetchOne();
 
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, uuid.toString());
-            ResultSet rs = prep.executeQuery();
-
-            if (rs.next())
-                return rs.getDouble("paid");
-
-            return 0;
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            if (record != null) {
+                return record.getValue(INTERESTS.PAID);
+            }
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
+        return 0;
     }
 
-    public static double getAllOutstandingDebt(Connection connection) {
-
+    public static double getAllOutstandingDebt(DSLContext dsl) {
         try {
-            String sql = "SELECT SUM(debt) AS total_debt FROM loans;;";
+            var record = dsl.select(DSL.sum(LOANS.DEBT))
+                    .from(LOANS)
+                    .fetchOne();
 
-            PreparedStatement prep = connection.prepareStatement(sql);
-            ResultSet rs = prep.executeQuery();
-
-            if (rs.next())
-                return rs.getDouble("total_debt");
-
-            return 0;
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            if (record != null) {
+                return record.component1().doubleValue();
+            }
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
+        return 0;
     }
 
-    public static double getAllInterestsPaid(Connection connection) {
-
+    public static double getAllInterestsPaid(DSLContext dsl) {
         try {
-            String sql = "SELECT SUM(paid) AS total_paid FROM interests;;";
+            var record = dsl.select(DSL.sum(INTERESTS.PAID))
+                    .from(INTERESTS)
+                    .fetchOne();
 
-            PreparedStatement prep = connection.prepareStatement(sql);
-            ResultSet rs = prep.executeQuery();
-
-            if (rs.next())
-                return rs.getDouble("total_paid");
-
-            return 0;
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            if (record != null) {
+                return record.component1().doubleValue();
+            }
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
+        return 0;
     }
 
 }

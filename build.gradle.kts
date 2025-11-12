@@ -3,6 +3,7 @@ import java.util.Locale
 plugins {
     java
     id("com.gradleup.shadow") version "9.2.2"
+    id("org.jooq.jooq-codegen-gradle") version "3.20.8"
     // id("io.freefair.lombok") version "8.13.1"
 }
 
@@ -46,6 +47,9 @@ repositories {
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.10-R0.1-SNAPSHOT")
 
+    jooqCodegen("org.jooq:jooq-codegen:3.20.8")
+    jooqCodegen("com.h2database:h2:2.4.240")
+
     implementation("xyz.xenondevs.invui:invui:1.43")
     implementation("jfree:jfreechart:1.0.13")
     implementation("net.dv8tion:JDA:5.0.0-beta.18")
@@ -57,6 +61,10 @@ dependencies {
     implementation("net.kyori:adventure-platform-bukkit:4.3.3")
     implementation("org.mindrot:jbcrypt:0.4")
     implementation("org.bstats:bstats-bukkit:3.1.0")
+    implementation("com.mysql:mysql-connector-j:9.5.0")
+    implementation("com.h2database:h2:2.4.240")
+    implementation("com.zaxxer:HikariCP:7.0.2")
+    implementation("org.jooq:jooq:3.20.8")
 
     compileOnly("me.leoko.advancedgui:AdvancedGUI:2.2.8")
     compileOnly("me.clip:placeholderapi:2.11.5")
@@ -131,10 +139,52 @@ tasks.processResources {
 }
 
 tasks.compileJava {
+    dependsOn("jooqCodegen")
     options.encoding = "UTF-8"
 
     if (targetJavaVersion >= 17 || JavaVersion.current().isJava10Compatible) {
         options.release.set(targetJavaVersion)
+    }
+}
+
+val script = projectDir.resolve("src/main/resources/db/schema.sql")
+jooq {
+    configuration {
+        jdbc {
+            driver = "org.h2.Driver"
+            url = "jdbc:h2:mem:jooq_codegen;DB_CLOSE_DELAY=-1;MODE=MySQL;INIT=RUNSCRIPT FROM '${script.absolutePath.replace("\\", "\\\\")}'"
+            user = "sa"
+            password = ""
+        }
+        generator {
+            database {
+                name = "org.jooq.meta.h2.H2Database"
+                properties {
+                    property {
+                        key = "scripts"
+                        value = script.toString()
+                    }
+                }
+            }
+            generate {
+                isDaos = true
+                isPojos = true
+                isRecords = true
+                isLinks = true
+            }
+            target {
+                packageName = "me.biquaternions.nascraft.schema"
+                directory = "src/main/generated"
+            }
+        }
+    }
+}
+
+sourceSets {
+    main {
+        java {
+            srcDir("src/main/generated")
+        }
     }
 }
 
@@ -152,6 +202,8 @@ tasks.shadowJar {
         "de.tr7zw.changeme.nbtapi" to "nbtapi",
         "io.javalin" to "web.libs.javalin",
         "kotlin" to "web.libs.kotlin",
+        "org.jooq" to "jooq",
+        "com.zaxxer.hikari" to "hikari",
     ).forEach { (key, value) ->
         relocate(key, "me.bounser.$value")
     }

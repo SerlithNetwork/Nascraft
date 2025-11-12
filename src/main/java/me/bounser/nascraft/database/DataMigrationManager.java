@@ -3,15 +3,14 @@ package me.bounser.nascraft.database;
 import me.bounser.nascraft.Nascraft;
 import me.bounser.nascraft.config.Config;
 import me.bounser.nascraft.database.commands.resources.Trade;
+import me.bounser.nascraft.database.h2.H2;
 import me.bounser.nascraft.database.redis.Redis;
-import me.bounser.nascraft.database.sqlite.SQLite;
 import me.bounser.nascraft.managers.scheduler.SchedulerManager;
 import me.bounser.nascraft.market.MarketManager;
 import me.bounser.nascraft.market.unit.Item;
 
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -109,10 +108,10 @@ public class DataMigrationManager {
     }
     
     /**
-     * Start migration from SQLite to Redis
+     * Start migration from H2 to Redis
      */
-    public CompletableFuture<Boolean> migrateFromSQLiteToRedis() {
-        Database sqlite = SQLite.getInstance();
+    public CompletableFuture<Boolean> migrateFromH2ToRedis() {
+        Database h2 = H2.getInstance();
         
         // Create a Redis database instance for migration
         String host = Config.getInstance().getRedisHost();
@@ -123,7 +122,7 @@ public class DataMigrationManager {
         
         Database redis = new Redis(plugin, host, port, password, username, database);
         
-        return migrateData(sqlite, redis);
+        return migrateData(h2, redis);
     }
     
     /**

@@ -2,8 +2,9 @@ package me.bounser.nascraft.database.redis;
 
 import me.bounser.nascraft.Nascraft;
 import me.bounser.nascraft.config.Config;
+import me.bounser.nascraft.database.AbstractRelationalDatabase;
 import me.bounser.nascraft.database.Database;
-import me.bounser.nascraft.database.sqlite.SQLite;
+import me.bounser.nascraft.database.h2.H2;
 import me.bounser.nascraft.database.commands.resources.Trade;
 import me.bounser.nascraft.market.unit.stats.Instant;
 import me.bounser.nascraft.chart.cpi.CPIInstant;
@@ -31,7 +32,7 @@ public class Redis implements Database {
 
     private final Nascraft plugin;
     private final JedisPool pool;
-    private final SQLite fallbackDatabase;
+    private final AbstractRelationalDatabase fallbackDatabase;
     private final CacheManager cacheManager;
     private final ExecutorService executorService;
     private final Map<String, Object> pendingWrites = new ConcurrentHashMap<>();
@@ -46,7 +47,7 @@ public class Redis implements Database {
         this.plugin = plugin;
         this.cacheManager = CacheManager.getInstance();
         this.executorService = Executors.newSingleThreadExecutor();
-        this.fallbackDatabase = SQLite.getInstance();
+        this.fallbackDatabase = H2.getInstance();
         
         // Initialize the fallback database connection first
         fallbackDatabase.connect();
@@ -79,7 +80,7 @@ public class Redis implements Database {
             distributedSync.enable();
             
         } catch (JedisException e) {
-            plugin.getLogger().severe("Failed to connect to Redis server! Using SQLite as fallback.");
+            plugin.getLogger().severe("Failed to connect to Redis server! Using H2 as fallback.");
             plugin.getLogger().severe(e.getMessage());
         }
         
@@ -564,7 +565,7 @@ public class Redis implements Database {
         
         try {
             if (!connected) {
-                plugin.getLogger().warning("Redis not connected - falling back to SQLite for trade save");
+                plugin.getLogger().warning("Redis not connected - falling back to H2 for trade save");
                 fallbackDatabase.saveTrade(trade);
                 return;
             }
@@ -614,7 +615,7 @@ public class Redis implements Database {
                 }
             }
         } catch (Exception e) {
-            plugin.getLogger().log(Level.SEVERE, "Error logging trade to Redis - falling back to SQLite", e);
+            plugin.getLogger().log(Level.SEVERE, "Error logging trade to Redis - falling back to H2", e);
             fallbackDatabase.saveTrade(trade);
         }
     }

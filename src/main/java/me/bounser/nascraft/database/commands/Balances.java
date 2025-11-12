@@ -6,22 +6,21 @@ import me.bounser.nascraft.managers.MoneyManager;
 import me.bounser.nascraft.managers.currencies.CurrenciesManager;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import org.jooq.DSLContext;
+import org.jooq.exception.DataAccessException;
+import org.jooq.impl.DSL;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import static me.biquaternions.nascraft.schema.public_.Tables.BALANCES;
+import static me.biquaternions.nascraft.schema.public_.Tables.MONEY_SUPPLY;
 
 public class Balances {
 
-    private static final Logger log = Nascraft.getInstance().getLogger();
-
-    public static void updateBalance(Connection connection, UUID uuid) {
+    public static void updateBalance(DSLContext dsl, UUID uuid) {
 
         Player player = Bukkit.getPlayer(uuid);
         if (player == null || player.isOp()) {
@@ -29,108 +28,71 @@ public class Balances {
         }
 
         try {
-            double currentBalance = MoneyManager.getInstance().getBalance(player, CurrenciesManager.getInstance().getDefaultCurrency());
-            double pastBalance = 0.0;
-            boolean playerExistsInDb = false;
+            dsl.transaction(configuration -> {
+                DSLContext ctx = DSL.using(configuration);
 
-            String sqlSelectBalance = "SELECT balance FROM balances WHERE uuid = ?;";
-            try (PreparedStatement prepSelect = connection.prepareStatement(sqlSelectBalance)) {
-                prepSelect.setString(1, uuid.toString());
-                try (ResultSet resultSetPast = prepSelect.executeQuery()) {
-                    if (resultSetPast.next()) {
-                        pastBalance = resultSetPast.getDouble("balance");
-                        playerExistsInDb = true;
-                    }
+                double currentBalance = MoneyManager.getInstance().getBalance(player, CurrenciesManager.getInstance().getDefaultCurrency());
+                double pastBalance = 0.0;
+
+                var pastBalanceRecord = ctx.select(BALANCES.BALANCE)
+                        .from(BALANCES)
+                        .where(BALANCES.UUID.eq(uuid.toString()))
+                        .fetchOne();
+                if (pastBalanceRecord != null) {
+                    pastBalance = pastBalanceRecord.getValue(BALANCES.BALANCE);
                 }
-            }
 
-            if (playerExistsInDb) {
-                if (currentBalance != pastBalance) {
-                    String sqlUpdateBalance = "UPDATE balances SET balance = ? WHERE uuid = ?;";
-                    try (PreparedStatement prepUpdate = connection.prepareStatement(sqlUpdateBalance)) {
-                        prepUpdate.setDouble(1, currentBalance);
-                        prepUpdate.setString(2, uuid.toString());
-                        int rowsAffected = prepUpdate.executeUpdate();
-                        if (rowsAffected == 0) {
-                            log.warning("Failed to update balance for existing player: " + uuid + ". No rows affected.");
-                        }
-                    }
-                } else {
+                ctx.insertInto(BALANCES)
+                        .set(BALANCES.UUID, uuid.toString())
+                        .set(BALANCES.BALANCE, currentBalance)
+                        .onDuplicateKeyUpdate()
+                        .set(BALANCES.BALANCE, currentBalance)
+                        .execute();
+
+                double balanceDifference = currentBalance - pastBalance;
+                if (balanceDifference == 0.0) {
                     return;
                 }
-            } else {
-                String sqlInsertBalance = "INSERT INTO balances (uuid, balance) VALUES (?, ?);";
-                try (PreparedStatement prepInsert = connection.prepareStatement(sqlInsertBalance)) {
-                    prepInsert.setString(1, uuid.toString());
-                    prepInsert.setDouble(2, currentBalance);
-                    prepInsert.executeUpdate();
+
+                int today = NormalisedDate.getDays();
+                var supplyRecord = ctx.select(MONEY_SUPPLY.DAY, MONEY_SUPPLY.SUPPLY)
+                        .from(MONEY_SUPPLY)
+                        .where(MONEY_SUPPLY.DAY.le(today))
+                        .orderBy(MONEY_SUPPLY.DAY.desc())
+                        .limit(1)
+                        .fetchOne();
+
+                if (supplyRecord != null && supplyRecord.get(MONEY_SUPPLY.DAY) == today) {
+                    double newSupply = supplyRecord.get(MONEY_SUPPLY.SUPPLY) + balanceDifference;
+                    ctx.update(MONEY_SUPPLY)
+                            .set(MONEY_SUPPLY.SUPPLY, newSupply)
+                            .where(MONEY_SUPPLY.DAY.eq(today))
+                            .execute();
+                } else {
+                    ctx.insertInto(MONEY_SUPPLY)
+                            .set(MONEY_SUPPLY.DAY, today)
+                            .set(MONEY_SUPPLY.SUPPLY, balanceDifference)
+                            .execute();
                 }
-            }
-
-            double balanceDifference = currentBalance - pastBalance;
-
-            if (balanceDifference == 0.0) {
-                return;
-            }
-
-            int today = NormalisedDate.getDays();
-            Integer targetDay = null;
-            double currentSupply = 0.0;
-            boolean update = false;
-
-            String sqlFindSupply = "SELECT day, supply FROM money_supply WHERE day <= ? ORDER BY day DESC LIMIT 1;";
-            try (PreparedStatement prepFindSupply = connection.prepareStatement(sqlFindSupply)) {
-                prepFindSupply.setInt(1, today);
-                try (ResultSet rsSupply = prepFindSupply.executeQuery()) {
-                    if (rsSupply.next()) {
-                        targetDay = rsSupply.getInt("day");
-                        currentSupply = rsSupply.getDouble("supply");
-                        if (targetDay == today) update = true;
-                    }
-                }
-            }
-
-            if (update) {
-                double newSupply = currentSupply + balanceDifference;
-
-                String sqlUpdateSupply = "UPDATE money_supply SET supply = ? WHERE day = ?;";
-                try (PreparedStatement prepUpdateSupply = connection.prepareStatement(sqlUpdateSupply)) {
-                    prepUpdateSupply.setDouble(1, newSupply);
-                    prepUpdateSupply.setInt(2, targetDay);
-                    prepUpdateSupply.executeUpdate();
-                }
-
-            } else {
-                String sqlInsertSupply = "INSERT INTO money_supply (day, supply) VALUES (?, ?);";
-                try (PreparedStatement prepInsertSupply = connection.prepareStatement(sqlInsertSupply)) {
-                    prepInsertSupply.setInt(1, today);
-                    prepInsertSupply.setDouble(2, balanceDifference);
-                    prepInsertSupply.executeUpdate();
-                }
-            }
-
-        } catch (SQLException e) {
-            throw new RuntimeException("Database operation failed for player " + uuid, e);
+            });
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn("Database operation failed for player {}", player.getName(), e);
         }
     }
 
-    public static Map<Integer, Double> getMoneySupplyHistory(Connection connection) throws SQLException {
+    public static Map<Integer, Double> getMoneySupplyHistory(DSLContext dsl) {
         Map<Integer, Double> supplyHistory = new HashMap<>();
-        String sql = "SELECT day, supply FROM money_supply ORDER BY day ASC;";
+        try {
+            var result = dsl.selectFrom(MONEY_SUPPLY)
+                    .orderBy(MONEY_SUPPLY.DAY.asc())
+                    .fetch();
 
-        try (PreparedStatement pstmt = connection.prepareStatement(sql);
-             ResultSet rs = pstmt.executeQuery()) {
-
-            while (rs.next()) {
-                int day = rs.getInt("day");
-                double supply = rs.getDouble("supply");
-                supplyHistory.put(day, supply); // Add the entry to the map
+            for (var record : result) {
+                supplyHistory.put(record.getDay(), record.getSupply());
             }
-        } catch (SQLException e) {
-            log.log(Level.SEVERE, "Failed to retrieve money supply history from database.", e);
-            throw e;
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn("Failed to retrieve money supply history from database.", e);
         }
-
         return supplyHistory;
     }
 

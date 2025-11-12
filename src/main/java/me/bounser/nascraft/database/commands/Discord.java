@@ -1,83 +1,83 @@
 package me.bounser.nascraft.database.commands;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import me.bounser.nascraft.Nascraft;
+import org.jooq.DSLContext;
+import org.jooq.exception.DataAccessException;
+
 import java.util.UUID;
+
+import static me.biquaternions.nascraft.schema.public_.Tables.DISCORD;
 
 public class Discord {
 
-    public static void saveDiscordLink(Connection connection, UUID uuid, String userId, String nickname) {
+    public static void saveDiscordLink(DSLContext dsl, UUID uuid, String userId, String nickname) {
         try {
-            String sql = "INSERT INTO discord (userid, uuid, nickname) VALUES (?,?,?);";
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, userId);
-            prep.setString(2, uuid.toString());
-            prep.setString(3, nickname);
-            prep.executeUpdate();
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            dsl.insertInto(DISCORD)
+                    .set(DISCORD.USERID, userId)
+                    .set(DISCORD.NICKNAME, nickname)
+                    .set(DISCORD.UUID, uuid.toString())
+                    .execute();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static void removeLink(Connection connection, UUID uuid) {
+    public static void removeLink(DSLContext dsl, UUID uuid) {
         try {
-            String sql = "DELETE FROM discord WHERE uuid=?;";
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, uuid.toString());
-            prep.executeUpdate();
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            dsl.deleteFrom(DISCORD)
+                    .where(DISCORD.UUID.eq(uuid.toString()))
+                    .execute();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static UUID getUUIDFromUserid(Connection connection, String userId) {
+    public static UUID getUUIDFromUserid(DSLContext dsl, String userId) {
         try {
-            String sql = "SELECT uuid FROM discord WHERE userid=?;";
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, userId);
-            ResultSet resultSet = prep.executeQuery();
+            var record = dsl.select(DISCORD.UUID)
+                    .from(DISCORD)
+                    .where(DISCORD.USERID.eq(userId))
+                    .fetchOne();
 
-            if (resultSet.next()) { return UUID.fromString(resultSet.getString("uuid")); }
-            else { return null; }
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    public static String getDiscordUserId(Connection connection, UUID uuid) {
-        try {
-            String sql = "SELECT userid FROM discord WHERE uuid=?;";
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, uuid.toString());
-            ResultSet resultSet = prep.executeQuery();
-
-            if (resultSet.next()) {
-                return resultSet.getString("userid");
-            } else {
-                return null;
+            if (record != null) {
+                return UUID.fromString(record.getValue(DISCORD.UUID));
             }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
+        return null;
     }
 
-    public static String getNicknameFromUserId(Connection connection, String userId) {
+    public static String getDiscordUserId(DSLContext dsl, UUID uuid) {
         try {
-            String sql = "SELECT nickname FROM discord WHERE userid=?;";
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, userId);
-            ResultSet resultSet = prep.executeQuery();
+            var record = dsl.select(DISCORD.USERID)
+                    .from(DISCORD)
+                    .where(DISCORD.UUID.eq(uuid.toString()))
+                    .fetchOne();
 
-            if (resultSet.next()) { return resultSet.getString("nickname"); }
-            else { return null; }
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            if (record != null) {
+                return record.getValue(DISCORD.USERID);
+            }
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
+        return null;
+    }
+
+    public static String getNicknameFromUserId(DSLContext dsl, String userId) {
+        try {
+            var record = dsl.select(DISCORD.NICKNAME)
+                    .from(DISCORD)
+                    .where(DISCORD.USERID.eq(userId))
+                    .fetchOne();
+
+            if (record != null) {
+                return record.getValue(DISCORD.NICKNAME);
+            }
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
+        }
+        return null;
     }
 
 }

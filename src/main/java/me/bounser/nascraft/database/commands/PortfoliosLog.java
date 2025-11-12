@@ -1,184 +1,150 @@
 package me.bounser.nascraft.database.commands;
 
+import me.bounser.nascraft.Nascraft;
 import me.bounser.nascraft.database.commands.resources.NormalisedDate;
 import me.bounser.nascraft.market.unit.Item;
+import org.jooq.DSLContext;
+import org.jooq.Record;
+import org.jooq.exception.DataAccessException;
+import org.jooq.impl.DSL;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
+
+import static me.biquaternions.nascraft.schema.public_.Tables.PORTFOLIOS_LOG;
 
 public class PortfoliosLog {
 
-    public static void logContribution(Connection connection, UUID uuid, Item item, int amount) {
-
+    public static void logContribution(DSLContext dsl, UUID uuid, Item item, int amount) {
+        double contribution = item.getPrice().getValue() * amount;
         try {
-            String sql1 = "SELECT contribution, amount, day FROM portfolios_log WHERE uuid=? AND identifier=? ORDER BY day DESC LIMIT 1;";
-            PreparedStatement prep1 =  connection.prepareStatement(sql1);
-            prep1.setString(1, uuid.toString());
-            prep1.setString(2, item.getIdentifier());
-            ResultSet resultSet = prep1.executeQuery();
+            dsl.insertInto(PORTFOLIOS_LOG)
+                    .set(PORTFOLIOS_LOG.UUID, uuid.toString())
+                    .set(PORTFOLIOS_LOG.IDENTIFIER, item.getIdentifier())
+                    .set(PORTFOLIOS_LOG.DAY, NormalisedDate.getDays())
+                    .set(PORTFOLIOS_LOG.AMOUNT, amount)
+                    .set(PORTFOLIOS_LOG.CONTRIBUTION, contribution)
+                    .onDuplicateKeyUpdate()
+                    .set(PORTFOLIOS_LOG.AMOUNT, PORTFOLIOS_LOG.AMOUNT.plus(amount))
+                    .set(PORTFOLIOS_LOG.CONTRIBUTION, PORTFOLIOS_LOG.CONTRIBUTION.plus(contribution))
+                    .execute();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
+        }
+    }
 
-            if (resultSet.next()) {
-                if (resultSet.getInt("day") == NormalisedDate.getDays()) {
-                    String sql2 = "UPDATE portfolios_log SET contribution=?, amount=? WHERE uuid=? AND identifier=? AND day=?;";
-                    PreparedStatement prep2 =  connection.prepareStatement(sql2);
-                    prep2.setDouble(1, item.getPrice().getValue()*amount + resultSet.getDouble("contribution"));
-                    prep2.setInt(2, amount + resultSet.getInt("amount"));
-                    prep2.setString(3, uuid.toString());
-                    prep2.setString(4, item.getIdentifier());
-                    prep2.setInt(5, NormalisedDate.getDays());
-                    prep2.executeUpdate();
-                } else {
-                    String sql2 = "INSERT INTO portfolios_log (uuid, identifier, amount, contribution, day) VALUES (?,?,?,?,?);";
-                    PreparedStatement prep2 = connection.prepareStatement(sql2);
-                    prep2.setString(1, uuid.toString());
-                    prep2.setString(2, item.getIdentifier());
-                    prep2.setInt(3, amount + resultSet.getInt("amount"));
-                    prep2.setDouble(4, item.getPrice().getValue()*amount + resultSet.getDouble("contribution"));
-                    prep2.setInt(5, NormalisedDate.getDays());
-                    prep2.executeUpdate();
+    public static void logWithdraw(DSLContext dsl, UUID uuid, Item item, int amount) {
+        try {
+            dsl.transaction(context -> {
+                DSLContext ctx = DSL.using(context);
+
+                var latest = ctx.select(PORTFOLIOS_LOG.CONTRIBUTION, PORTFOLIOS_LOG.AMOUNT, PORTFOLIOS_LOG.DAY)
+                        .from(PORTFOLIOS_LOG)
+                        .where(PORTFOLIOS_LOG.UUID.eq(uuid.toString()))
+                        .and(PORTFOLIOS_LOG.IDENTIFIER.eq(item.getIdentifier()))
+                        .orderBy(PORTFOLIOS_LOG.DAY.desc())
+                        .limit(1)
+                        .fetchOne();
+
+                if (latest == null) {
+                    return;
                 }
-            } else {
-                String sql2 = "INSERT INTO portfolios_log (uuid, identifier, amount, contribution, day) VALUES (?,?,?,?,?);";
-                PreparedStatement prep2 = connection.prepareStatement(sql2);
-                prep2.setString(1, uuid.toString());
-                prep2.setString(2, item.getIdentifier());
-                prep2.setInt(3, amount);
-                prep2.setDouble(4, item.getPrice().getValue()*amount);
-                prep2.setInt(5, NormalisedDate.getDays());
-                prep2.executeUpdate();
-            }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
-    }
 
-    public static void logWithdraw(Connection connection, UUID uuid, Item item, int amount) {
+                int today = NormalisedDate.getDays();
+                int latestAmount = latest.getValue(PORTFOLIOS_LOG.AMOUNT);
+                double latestContribution = latest.getValue(PORTFOLIOS_LOG.CONTRIBUTION);
+                int latestDay = latest.getValue(PORTFOLIOS_LOG.DAY);
 
-        try {
-            String sql1 = "SELECT contribution, amount, day FROM portfolios_log WHERE uuid=? AND identifier=? ORDER BY day DESC LIMIT 1;";
-            PreparedStatement prep1 =  connection.prepareStatement(sql1);
-            prep1.setString(1, uuid.toString());
-            prep1.setString(2, item.getIdentifier());
-            ResultSet resultSet = prep1.executeQuery();
-
-            if (!resultSet.next()) return;
-
-            if (resultSet.getInt("amount") == amount || resultSet.getInt("amount") < amount) {
-                String sql = "DELETE FROM portfolios_log WHERE uuid=? AND identifier=? AND day=?;";
-                PreparedStatement prep = connection.prepareStatement(sql);
-                prep.setString(1, uuid.toString());
-                prep.setString(2, item.getIdentifier());
-                prep.setInt(3, NormalisedDate.getDays());
-                prep.executeUpdate();
-
-            } else if (resultSet.getInt("day") == NormalisedDate.getDays()) {
-
-                String sql2 = "UPDATE portfolios_log SET amount=?, contribution=? WHERE uuid=? AND identifier=?;";
-                PreparedStatement prep2 =  connection.prepareStatement(sql2);
-                prep2.setInt(1, resultSet.getInt("amount") - amount);
-                prep2.setDouble(2, amount * resultSet.getDouble("contribution") / (float) resultSet.getInt("amount"));
-                prep2.setString(3, uuid.toString());
-                prep2.setString(4, item.getIdentifier());
-                prep2.executeUpdate();
-
-            } else {
-                String sql2 = "INSERT INTO portfolios_log (uuid, identifier, amount, contribution) VALUES (?,?,?,?);";
-                PreparedStatement prep2 =  connection.prepareStatement(sql2);
-                prep2.setString(1, uuid.toString());
-                prep2.setString(2, item.getIdentifier());
-                prep2.setInt(3, resultSet.getInt("amount") - amount);
-                prep2.setDouble(4, amount * resultSet.getDouble("contribution") / (float) resultSet.getInt("amount"));
-                prep2.executeUpdate();
-            }
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    public static HashMap<Integer, Double> getContributionChangeEachDay(Connection connection, UUID uuid) {
-
-        try {
-            HashMap<Integer, Double> dayAndContribution = new HashMap<>();
-
-            String sql1 = "SELECT contribution, amount, day FROM portfolios_log WHERE uuid=? ORDER BY day DESC;";
-            PreparedStatement prep1 =  connection.prepareStatement(sql1);
-            prep1.setString(1, uuid.toString());
-            ResultSet resultSet = prep1.executeQuery();
-
-            while (resultSet.next()) {
-                int day = resultSet.getInt("day");
-
-                if (dayAndContribution.containsKey(day)) dayAndContribution.put(day, dayAndContribution.get(day) + resultSet.getDouble("contribution"));
-                else dayAndContribution.put(resultSet.getInt("day"), resultSet.getDouble("contribution"));
-            }
-
-            return dayAndContribution;
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    public static HashMap<Integer, HashMap<String, Integer>> getCompositionEachDay(Connection connection, UUID uuid) {
-
-        try {
-            HashMap<Integer, HashMap<String, Integer>> dayAndComposition = new HashMap<>();
-
-            String sql1 = "SELECT identifier, amount, day FROM portfolios_log WHERE uuid=? ORDER BY day DESC;";
-            PreparedStatement prep1 =  connection.prepareStatement(sql1);
-            prep1.setString(1, uuid.toString());
-            ResultSet resultSet = prep1.executeQuery();
-
-            while (resultSet.next()) {
-                String identifier = resultSet.getString("identifier");
-                int day = resultSet.getInt("day");
-                int amount = resultSet.getInt("amount");
-
-                if (dayAndComposition.containsKey(day)) {
-
-                    HashMap<String, Integer> composition = dayAndComposition.get(day);
-
-                    composition.put(identifier, amount);
-
-                    dayAndComposition.put(day, composition);
-
+                if (latestAmount <= amount) {
+                    ctx.deleteFrom(PORTFOLIOS_LOG)
+                            .where(PORTFOLIOS_LOG.UUID.eq(uuid.toString()))
+                            .and(PORTFOLIOS_LOG.IDENTIFIER.eq(item.getIdentifier()))
+                            .and(PORTFOLIOS_LOG.DAY.eq(today))
+                            .execute();
                 } else {
-                    HashMap<String, Integer> composition = new HashMap<>();
+                    int newAmount = latestAmount - amount;
+                    double newContribution = latestContribution / latestAmount;
 
-                    composition.put(identifier, amount);
-
-                    dayAndComposition.put(day, composition);
+                    if (latestDay == today) {
+                        ctx.update(PORTFOLIOS_LOG)
+                                .set(PORTFOLIOS_LOG.AMOUNT, newAmount)
+                                .set(PORTFOLIOS_LOG.CONTRIBUTION, newContribution)
+                                .where(PORTFOLIOS_LOG.UUID.eq(uuid.toString()))
+                                .and(PORTFOLIOS_LOG.IDENTIFIER.eq(item.getIdentifier()))
+                                .execute();
+                    } else {
+                        ctx.insertInto(PORTFOLIOS_LOG)
+                                .set(PORTFOLIOS_LOG.UUID, uuid.toString())
+                                .set(PORTFOLIOS_LOG.IDENTIFIER, item.getIdentifier())
+                                .set(PORTFOLIOS_LOG.DAY, today)
+                                .set(PORTFOLIOS_LOG.AMOUNT, newAmount)
+                                .set(PORTFOLIOS_LOG.CONTRIBUTION, newContribution)
+                                .execute();
+                    }
                 }
-            }
-            return dayAndComposition;
 
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            });
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static int getFirstDay(Connection connection, UUID uuid) {
-
+    public static HashMap<Integer, Double> getContributionChangeEachDay(DSLContext dsl, UUID uuid) {
+        HashMap<Integer, Double> dayAndContribution = new HashMap<>();
         try {
-            String sql = "SELECT MIN(day) AS first_day FROM portfolios_log WHERE uuid=?;";
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, uuid.toString());
-            ResultSet resultSet = prep.executeQuery();
+            var result = dsl.select(PORTFOLIOS_LOG.CONTRIBUTION, PORTFOLIOS_LOG.AMOUNT)
+                    .from(PORTFOLIOS_LOG)
+                    .where(PORTFOLIOS_LOG.UUID.eq(uuid.toString()))
+                    .orderBy(PORTFOLIOS_LOG.DAY.desc())
+                    .fetch();
 
-            if (resultSet.next()) {
-                return resultSet.getInt("first_day");
-            } else {
-                return NormalisedDate.getDays();
+            for (Record record : result) {
+                int day = record.getValue(PORTFOLIOS_LOG.DAY);
+                dayAndContribution.merge(day, record.getValue(PORTFOLIOS_LOG.CONTRIBUTION), Double::sum);
             }
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
+        return dayAndContribution;
+    }
+
+    public static HashMap<Integer, HashMap<String, Integer>> getCompositionEachDay(DSLContext dsl, UUID uuid) {
+        HashMap<Integer, HashMap<String, Integer>> dayAndComposition = new HashMap<>();
+        try {
+            var result = dsl.select(PORTFOLIOS_LOG.IDENTIFIER, PORTFOLIOS_LOG.AMOUNT)
+                    .from(PORTFOLIOS_LOG)
+                    .where(PORTFOLIOS_LOG.UUID.eq(uuid.toString()))
+                    .orderBy(PORTFOLIOS_LOG.DAY.desc())
+                    .fetch();
+
+            for (Record record : result) {
+                String identifier = record.getValue(PORTFOLIOS_LOG.IDENTIFIER);
+                int day = record.getValue(PORTFOLIOS_LOG.DAY);
+                int amount = record.getValue(PORTFOLIOS_LOG.AMOUNT);
+                dayAndComposition.merge(day, new HashMap<>(Map.of(identifier, amount)), (current, introduced) -> {
+                    current.putAll(introduced);
+                    return current;
+                });
+            }
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
+        }
+        return dayAndComposition;
+    }
+
+    public static int getFirstDay(DSLContext dsl, UUID uuid) {
+        try {
+            var day = dsl.select(DSL.min(PORTFOLIOS_LOG.DAY).as("first_day"))
+                    .from(PORTFOLIOS_LOG)
+                    .where(PORTFOLIOS_LOG.UUID.eq(uuid.toString()))
+                    .fetchOne(r -> r != null ? r.get("first_day", Integer.class) : null);
+
+            return day != null ? day : NormalisedDate.getDays();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
+        }
+        return NormalisedDate.getDays();
     }
 
 }

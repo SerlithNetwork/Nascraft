@@ -1,450 +1,385 @@
 package me.bounser.nascraft.database.commands;
 
+import me.bounser.nascraft.Nascraft;
 import me.bounser.nascraft.database.commands.resources.NormalisedDate;
 import me.bounser.nascraft.market.unit.Item;
 import me.bounser.nascraft.market.unit.stats.Instant;
+import org.jooq.DSLContext;
+import org.jooq.exception.DataAccessException;
+import org.jooq.impl.DSL;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
+import static me.biquaternions.nascraft.schema.public_.Tables.*;
+
 public class HistorialData {
 
-    public static void saveDayPrice(Connection connection, Item item, Instant instant) {
-
+    public static void saveDayPrice(DSLContext dsl, Item item, Instant instant) {
         try {
-            String insert = "INSERT INTO prices_day (day, identifier, date, price, volume) VALUES (?,?,?,?,?);";
-
-            PreparedStatement insertStatement = connection.prepareStatement(insert);
-
-            insertStatement.setInt(1,NormalisedDate. getDays());
-            insertStatement.setString(2, item.getIdentifier());
-            insertStatement.setString(3, instant.getLocalDateTime().toString());
-            insertStatement.setDouble(4, instant.getPrice());
-            insertStatement.setInt(5, instant.getVolume());
-
-            insertStatement.executeUpdate();
-
-            String deleteQuery = "DELETE FROM prices_day WHERE day < ?;";
-
-            PreparedStatement deleteStatement = connection.prepareStatement(deleteQuery);
-
-            deleteStatement.setInt(1, NormalisedDate.getDays()-2);
-
-            deleteStatement.executeUpdate();
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            int today = NormalisedDate.getDays();
+            dsl.insertInto(PRICES_DAY)
+                    .set(PRICES_DAY.DAY, today)
+                    .set(PRICES_DAY.IDENTIFIER, item.getIdentifier())
+                    .set(PRICES_DAY.DATE, instant.getLocalDateTime().toString())
+                    .set(PRICES_DAY.PRICE, instant.getPrice())
+                    .set(PRICES_DAY.VOLUME, instant.getVolume())
+                    .execute();
+            dsl.deleteFrom(PRICES_DAY)
+                    .where(PRICES_DAY.DAY.lessThan(today - 2))
+                    .execute();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static void saveMonthPrice(Connection connection, Item item, Instant instant) {
-
+    public static void saveMonthPrice(DSLContext dsl, Item item, Instant instant) {
         try {
-            String select = "SELECT date FROM prices_month WHERE identifier=? ORDER BY id DESC LIMIT 1;";
+            dsl.transaction(configuration -> {
+                DSLContext ctx = DSL.using(configuration);
 
-            PreparedStatement preparedStatement = connection.prepareStatement(select);
+                var lastMonthRecord = ctx.select(PRICES_MONTH.DATE)
+                        .from(PRICES_MONTH)
+                        .where(PRICES_MONTH.IDENTIFIER.eq(item.getIdentifier()))
+                        .orderBy(PRICES_MONTH.ID.desc())
+                        .limit(1)
+                        .fetchOne();
 
-            preparedStatement.setString(1, item.getIdentifier());
+                int today = NormalisedDate.getDays();
+                if (lastMonthRecord == null) {
+                    ctx.insertInto(PRICES_MONTH)
+                            .set(PRICES_MONTH.DAY, today)
+                            .set(PRICES_MONTH.DATE, instant.getLocalDateTime().toString())
+                            .set(PRICES_MONTH.IDENTIFIER, item.getIdentifier())
+                            .set(PRICES_MONTH.PRICE, instant.getPrice())
+                            .set(PRICES_MONTH.VOLUME, instant.getVolume())
+                            .execute();
+                    return;
+                }
 
-            ResultSet resultSet = preparedStatement.executeQuery();
 
-            if (!resultSet.next()) {
+                LocalDateTime now = LocalDateTime.now();
+                LocalDateTime last = LocalDateTime.parse(lastMonthRecord.getValue(PRICES_MONTH.DATE));
+                if (last.isBefore(now.minusHours(4))) {
+                    var result = ctx.select(PRICES_MONTH.DATE, PRICES_MONTH.PRICE, PRICES_MONTH.VOLUME)
+                            .from(PRICES_MONTH)
+                            .where(PRICES_MONTH.IDENTIFIER.eq(item.getIdentifier()))
+                            .orderBy(PRICES_MONTH.ID.desc())
+                            .limit(48)
+                            .fetch();
 
-                String insert = "INSERT INTO prices_month (day, date, identifier, price, volume) VALUES (?,?,?,?,?);";
+                    if (result.isEmpty()) {
+                        ctx.insertInto(PRICES_MONTH)
+                                .set(PRICES_MONTH.DAY, today)
+                                .set(PRICES_MONTH.DATE, instant.getLocalDateTime().toString())
+                                .set(PRICES_MONTH.IDENTIFIER, item.getIdentifier())
+                                .set(PRICES_MONTH.PRICE, instant.getPrice())
+                                .set(PRICES_MONTH.VOLUME, instant.getVolume())
+                                .execute();
+                    } else {
+                        double totalPrice = 0.0;
+                        int totalVolume = 0;
+                        int count = 0;
+                        for (var record : result) {
+                            LocalDateTime date = LocalDateTime.parse(record.getValue(PRICES_MONTH.DATE));
+                            if (date.isAfter(now.minusHours(4))) {
+                                totalPrice += record.getValue(PRICES_MONTH.PRICE);
+                                totalVolume += record.getValue(PRICES_MONTH.VOLUME);
+                                count++;
+                            }
+                        }
 
-                PreparedStatement insertStatement = connection.prepareStatement(insert);
-
-                insertStatement.setInt(1, NormalisedDate.getDays());
-                insertStatement.setString(2, instant.getLocalDateTime().toString());
-                insertStatement.setString(3, item.getIdentifier());
-                insertStatement.setDouble(4, instant.getPrice());
-                insertStatement.setInt(5, instant.getVolume());
-
-                insertStatement.executeUpdate();
-            } else if (LocalDateTime.parse(resultSet.getString("date")).isBefore(LocalDateTime.now().minusHours(4))) {
-
-                String selectDay = "SELECT date, price, volume FROM prices_day WHERE identifier=? ORDER BY id DESC LIMIT 48;";
-
-                PreparedStatement preparedStatementDay = connection.prepareStatement(selectDay);
-
-                preparedStatementDay.setString(1, item.getIdentifier());
-
-                ResultSet resultSetDay = preparedStatementDay.executeQuery();
-
-                if (!resultSetDay.next()) {
-
-                    String insert = "INSERT INTO prices_month (day, date, identifier, price, volume) VALUES (?,?,?,?,?);";
-
-                    PreparedStatement insertStatement = connection.prepareStatement(insert);
-
-                    insertStatement.setInt(1, NormalisedDate.getDays());
-                    insertStatement.setString(2, instant.getLocalDateTime().toString());
-                    insertStatement.setString(3, item.getIdentifier());
-                    insertStatement.setDouble(4, instant.getPrice());
-                    insertStatement.setInt(5, instant.getVolume());
-
-                    insertStatement.executeUpdate();
-
-                } else {
-
-                    double averagePrice = 0;
-                    int totalVolume = 0;
-
-                    int i = 0;
-
-                    while (resultSetDay.next()) {
-                        if (LocalDateTime.parse(resultSetDay.getString("date")).isAfter(LocalDateTime.now().minusHours(4))) {
-                            i++;
-                            averagePrice += resultSetDay.getDouble("price");
-                            totalVolume += resultSetDay.getInt("volume");
+                        if (count > 0) {
+                            ctx.insertInto(PRICES_MONTH)
+                                    .set(PRICES_MONTH.DAY, today)
+                                    .set(PRICES_MONTH.DATE, now.minusHours(2).toString())
+                                    .set(PRICES_MONTH.IDENTIFIER, item.getIdentifier())
+                                    .set(PRICES_MONTH.PRICE, totalPrice / count)
+                                    .set(PRICES_MONTH.VOLUME, totalVolume)
+                                    .execute();
                         }
                     }
 
-                    if (averagePrice == 0) return;
-
-                    String insert = "INSERT INTO prices_month (day, date, identifier, price, volume) VALUES (?,?,?,?,?);";
-
-                    PreparedStatement insertStatement = connection.prepareStatement(insert);
-
-                    insertStatement.setInt(1, NormalisedDate.getDays());
-                    insertStatement.setString(2, LocalDateTime.now().minusHours(2).toString());
-                    insertStatement.setString(3, item.getIdentifier());
-                    insertStatement.setDouble(4, averagePrice/i);
-                    insertStatement.setInt(5, totalVolume);
-
-                    insertStatement.executeUpdate();
+                    ctx.deleteFrom(PRICES_MONTH)
+                            .where(PRICES_MONTH.DAY.lessThan(today - 31))
+                            .execute();
                 }
-
-                String deleteQuery = "DELETE FROM prices_month WHERE day < ?;";
-
-                PreparedStatement deleteStatement = connection.prepareStatement(deleteQuery);
-
-                deleteStatement.setInt(1, NormalisedDate.getDays()-31);
-                deleteStatement.executeUpdate();
-            }
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            });
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static void saveHistoryPrices(Connection connection, Item item, Instant instant) {
-
+    public static void saveHistoryPrices(DSLContext dsl, Item item, Instant instant) {
         try {
-            String select = "SELECT date FROM prices_history WHERE day=? AND identifier=?;";
+            dsl.transaction(configuration -> {
+                DSLContext ctx = DSL.using(configuration);
 
-            PreparedStatement preparedStatement = connection.prepareStatement(select);
+                int today = NormalisedDate.getDays();
+                var existing = ctx.select(PRICES_HISTORY.DATE)
+                        .from(PRICES_HISTORY)
+                        .where(PRICES_HISTORY.DAY.eq(today))
+                        .and(PRICES_HISTORY.IDENTIFIER.eq(item.getIdentifier()))
+                        .fetchOne();
 
-            preparedStatement.setInt(1, NormalisedDate.getDays());
+                if (existing != null) {
+                    return;
+                }
 
-            preparedStatement.setString(2, item.getIdentifier());
+                var recentMonthly = ctx.select(PRICES_MONTH.DATE, PRICES_MONTH.PRICE, PRICES_MONTH.VOLUME)
+                        .from(PRICES_MONTH)
+                        .where(PRICES_MONTH.IDENTIFIER.eq(item.getIdentifier()))
+                        .orderBy(PRICES_MONTH.ID.desc())
+                        .limit(6)
+                        .fetch();
 
-            ResultSet resultSet = preparedStatement.executeQuery();
+                if (recentMonthly.isEmpty()) {
+                    ctx.insertInto(PRICES_HISTORY)
+                            .set(PRICES_HISTORY.DAY, today)
+                            .set(PRICES_HISTORY.DATE, instant.getLocalDateTime().toString())
+                            .set(PRICES_HISTORY.IDENTIFIER, item.getIdentifier())
+                            .set(PRICES_HISTORY.PRICE, instant.getPrice())
+                            .set(PRICES_HISTORY.VOLUME, instant.getVolume())
+                            .execute();
+                    return;
+                }
 
-            if (!resultSet.next()){
-
-                String selectMonth = "SELECT date, price, volume FROM prices_month WHERE identifier=? ORDER BY id DESC LIMIT 6;";
-
-                PreparedStatement preparedStatementMonth = connection.prepareStatement(selectMonth);
-
-                preparedStatementMonth.setString(1, item.getIdentifier());
-
-                ResultSet resultSetMonth = preparedStatementMonth.executeQuery();
-
-                if (!resultSetMonth.next()) {
-
-                    String insert = "INSERT INTO prices_history (day, date, identifier, price, volume) VALUES (?,?,?,?,?);";
-
-                    PreparedStatement insertStatement = connection.prepareStatement(insert);
-
-                    insertStatement.setInt(1, NormalisedDate.getDays());
-                    insertStatement.setString(2, instant.getLocalDateTime().toString());
-                    insertStatement.setString(3, item.getIdentifier());
-                    insertStatement.setDouble(4, instant.getPrice());
-                    insertStatement.setInt(5, instant.getVolume());
-
-                    insertStatement.executeUpdate();
-
-                } else {
-                    double averagePrice = 0;
-                    int totalVolume = 0;
-
-                    int i = 0;
-
-                    while (resultSetMonth.next()) {
-                        if (LocalDateTime.parse(resultSetMonth.getString("date")).isAfter(LocalDateTime.now().minusHours(24))) {
-                            i++;
-                            averagePrice += resultSetMonth.getDouble("price");
-                            totalVolume += resultSetMonth.getInt("volume");
-                        }
+                double totalPrice = 0.0;
+                int totalVolume = 0;
+                int count = 0;
+                LocalDateTime now = LocalDateTime.now();
+                for (var record : recentMonthly) {
+                    LocalDateTime date = LocalDateTime.parse(record.getValue(PRICES_MONTH.DATE));
+                    if (date.isAfter(now.minusHours(24))) {
+                        totalPrice += record.getValue(PRICES_MONTH.PRICE);
+                        totalVolume += record.getValue(PRICES_MONTH.VOLUME);
+                        count++;
                     }
-
-                    String insert = "INSERT INTO prices_history (day, date, identifier, price, volume) VALUES (?,?,?,?,?);";
-
-                    PreparedStatement insertStatement = connection.prepareStatement(insert);
-
-                    insertStatement.setInt(1, NormalisedDate.getDays());
-                    insertStatement.setString(2, LocalDateTime.now().minusHours(12).toString());
-                    insertStatement.setString(3, item.getIdentifier());
-                    insertStatement.setDouble(4, averagePrice/i);
-                    insertStatement.setInt(5, totalVolume);
-
-                    insertStatement.executeUpdate();
                 }
-            }
 
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+                if (count <= 0) {
+                    return;
+                }
+
+                ctx.insertInto(PRICES_HISTORY)
+                        .set(PRICES_HISTORY.DAY, today)
+                        .set(PRICES_HISTORY.DATE, now.minusHours(12).toString())
+                        .set(PRICES_HISTORY.IDENTIFIER, item.getIdentifier())
+                        .set(PRICES_HISTORY.PRICE, totalPrice / count)
+                        .set(PRICES_HISTORY.VOLUME, totalVolume)
+                        .execute();
+            });
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
 
-    public static List<Instant> getDayPrices(Connection connection, Item item) {
-
-        List<Instant> prices = new LinkedList<>();
-
+    public static List<Instant> getDayPrices(DSLContext dsl, Item item) {
         try {
-            String select = "SELECT date FROM prices_day WHERE identifier=? ORDER BY id DESC LIMIT 1;";
+            return dsl.transactionResult(configuration -> {
+                DSLContext ctx = DSL.using(configuration);
+                List<Instant> prices = new LinkedList<>();
 
-            PreparedStatement preparedStatement = connection.prepareStatement(select);
+                var record = ctx.select(PRICES_DAY.DATE)
+                        .from(PRICES_DAY)
+                        .where(PRICES_DAY.IDENTIFIER.eq(item.getIdentifier()))
+                        .orderBy(PRICES_DAY.ID.desc())
+                        .limit(1)
+                        .fetchOne();
 
-            preparedStatement.setString(1, item.getIdentifier());
+                if (record == null) {
+                    prices.add(new Instant(LocalDateTime.now().minusHours(24), 0, 0));
+                    prices.add(new Instant(LocalDateTime.now().minusMinutes(5), 0, 0));
+                    prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
+                    return prices;
+                }
 
-            ResultSet resultSet = preparedStatement.executeQuery();
+                var result = ctx.select(PRICES_DAY.DATE, PRICES_DAY.PRICE, PRICES_DAY.VOLUME)
+                        .from(PRICES_DAY)
+                        .where(PRICES_DAY.IDENTIFIER.eq(item.getIdentifier()))
+                        .orderBy(PRICES_DAY.ID.desc())
+                        .limit(288)
+                        .fetch();
 
-            if (!resultSet.next()) {
-
-                prices.add(new Instant(LocalDateTime.now().minusHours(24), 0, 0));
-                prices.add(new Instant(LocalDateTime.now().minusMinutes(5), 0, 0));
-
-                prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
-
-            } else {
-
-                String select288 = "SELECT date, price, volume FROM prices_day WHERE identifier=? ORDER BY id DESC LIMIT 288;";
-
-                PreparedStatement preparedStatement288 = connection.prepareStatement(select288);
-
-                preparedStatement288.setString(1, item.getIdentifier());
-
-                ResultSet resultSet1 = preparedStatement288.executeQuery();
-
-                while (resultSet1.next()) {
-
-                    LocalDateTime time = LocalDateTime.parse(resultSet1.getString("date"));
-
-                    double price = resultSet1.getDouble("price");
-
-                    if (time.isAfter(LocalDateTime.now().minusHours(24)) && price != 0) {
+                for (var r : result) {
+                    LocalDateTime time = LocalDateTime.parse(r.getValue(PRICES_DAY.DATE));
+                    double price = r.getValue(PRICES_DAY.PRICE);
+                    if (time.isAfter(LocalDateTime.now().minusHours(24)) && Math.round(price) != 0) {
                         prices.add(new Instant(
                                 time,
-                                resultSet1.getDouble("price"),
-                                resultSet1.getInt("volume")
+                                r.getValue(PRICES_DAY.PRICE),
+                                r.getValue(PRICES_DAY.VOLUME)
                         ));
-
                     }
                 }
-
-                prices.add(0, new Instant(LocalDateTime.now().minusHours(24), 0, 0));
-
+                prices.addFirst(new Instant(LocalDateTime.now().minusHours(24), 0, 0));
                 prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
-            }
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+                return prices;
+            });
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
-
-        return prices;
+        return Collections.emptyList();
     }
 
-    public static List<Instant> getMonthPrices(Connection connection, Item item) {
-
-        List<Instant> prices = new LinkedList<>();
-
+    public static List<Instant> getMonthPrices(DSLContext dsl, Item item) {
         try {
-            String select = "SELECT date FROM prices_month WHERE identifier=? ORDER BY id DESC LIMIT 1;";
+            return dsl.transactionResult(configuration -> {
+                DSLContext ctx = DSL.using(configuration);
+                List<Instant> prices = new LinkedList<>();
 
-            PreparedStatement preparedStatement = connection.prepareStatement(select);
+                var record = ctx.select(PRICES_MONTH.DATE)
+                        .from(PRICES_MONTH)
+                        .where(PRICES_MONTH.IDENTIFIER.eq(item.getIdentifier()))
+                        .orderBy(PRICES_MONTH.ID.desc())
+                        .limit(1)
+                        .fetchOne();
 
-            preparedStatement.setString(1, item.getIdentifier());
+                // noinspection DuplicatedCode
+                if (record == null) {
+                    prices.add(new Instant(LocalDateTime.now().minusDays(30), 0, 0));
+                    prices.add(new Instant(LocalDateTime.now().minusMinutes(5), 0, 0));
+                    prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
+                    return prices;
+                }
 
-            ResultSet resultSet = preparedStatement.executeQuery();
+                var result = ctx.select(PRICES_MONTH.DATE, PRICES_MONTH.PRICE, PRICES_MONTH.VOLUME)
+                        .from(PRICES_MONTH)
+                        .where(PRICES_MONTH.IDENTIFIER.eq(item.getIdentifier()))
+                        .orderBy(PRICES_MONTH.ID.desc())
+                        .limit(400)
+                        .fetch();
 
-            if (!resultSet.next()) {
-
-                prices.add(new Instant(LocalDateTime.now().minusDays(30), 0, 0));
-                prices.add(new Instant(LocalDateTime.now().minusMinutes(5), 0, 0));
-
-                prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
-
-            } else {
-
-                String select288 = "SELECT date, price, volume FROM prices_month WHERE identifier=? ORDER BY id DESC LIMIT 400;";
-
-                PreparedStatement preparedStatement288 = connection.prepareStatement(select288);
-
-                preparedStatement288.setString(1, item.getIdentifier());
-
-                ResultSet resultSet1 = preparedStatement288.executeQuery();
-
-                while (resultSet1.next()) {
-
-                    LocalDateTime time = LocalDateTime.parse(resultSet1.getString("date"));
-
+                for (var r : result) {
+                    LocalDateTime time = LocalDateTime.parse(r.getValue(PRICES_MONTH.DATE));
                     if (time.isAfter(LocalDateTime.now().minusDays(30))) {
                         prices.add(new Instant(
                                 time,
-                                resultSet1.getDouble("price"),
-                                resultSet1.getInt("volume")
+                                r.getValue(PRICES_MONTH.PRICE),
+                                r.getValue(PRICES_MONTH.VOLUME)
                         ));
-
                     }
                 }
-
-                prices.add(0, new Instant(LocalDateTime.now().minusDays(30), 0, 0));
-
+                prices.addFirst(new Instant(LocalDateTime.now().minusDays(30), 0, 0));
                 prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
-            }
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+                return prices;
+            });
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
-
-        return prices;
+        return Collections.emptyList();
     }
 
-    public static List<Instant> getYearPrices(Connection connection, Item item) {
-
-        List<Instant> prices = new LinkedList<>();
-
+    public static List<Instant> getYearPrices(DSLContext dsl, Item item) {
         try {
-            String select = "SELECT day FROM prices_history WHERE identifier=? ORDER BY day DESC LIMIT 1;";
+            return dsl.transactionResult(configuration ->  {
+                DSLContext ctx = DSL.using(configuration);
+                List<Instant> prices = new LinkedList<>();
 
-            PreparedStatement preparedStatement = connection.prepareStatement(select);
+                var record = ctx.select(PRICES_HISTORY.DAY)
+                        .from(PRICES_HISTORY)
+                        .where(PRICES_HISTORY.IDENTIFIER.eq(item.getIdentifier()))
+                        .orderBy(PRICES_HISTORY.DAY.desc())
+                        .limit(1)
+                        .fetchOne();
 
-            preparedStatement.setString(1, item.getIdentifier());
+                if (record == null) {
+                    prices.add(new Instant(LocalDateTime.now().minusDays(365), 0, 0));
+                    prices.add(new Instant(LocalDateTime.now().minusMinutes(5), 0, 0));
+                    prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
+                    return prices;
+                }
 
-            ResultSet resultSet = preparedStatement.executeQuery();
+                var result = ctx.select(PRICES_HISTORY.DAY, PRICES_HISTORY.PRICE, PRICES_HISTORY.VOLUME)
+                        .from(PRICES_HISTORY)
+                        .where(PRICES_HISTORY.IDENTIFIER.eq(item.getIdentifier()))
+                        .orderBy(PRICES_HISTORY.DAY.desc())
+                        .limit(385)
+                        .fetch();
 
-            if (!resultSet.next()) {
-
-                prices.add(new Instant(LocalDateTime.now().minusDays(365), 0, 0));
-                prices.add(new Instant(LocalDateTime.now().minusMinutes(5), 0, 0));
-
-                prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
-
-            } else {
-
-                String select288 = "SELECT day, price, volume FROM prices_history WHERE identifier=? ORDER BY day DESC LIMIT 385;";
-
-                PreparedStatement preparedStatement288 = connection.prepareStatement(select288);
-
-                preparedStatement288.setString(1, item.getIdentifier());
-
-                ResultSet resultSet1 = preparedStatement288.executeQuery();
-
-                while (resultSet1.next()) {
-
-                    LocalDateTime time = LocalDateTime.of(2023, 1, 1, 1, 1).plusDays(resultSet1.getInt("day"));
-
+                for (var r : result) {
+                    LocalDateTime time = LocalDateTime.of(2023, 1, 1, 1, 1).plusDays(r.getValue(PRICES_HISTORY.DAY));
                     if (time.isAfter(LocalDateTime.now().minusDays(365))) {
                         prices.add(new Instant(
                                 time,
-                                resultSet1.getDouble("price"),
-                                resultSet1.getInt("volume")
+                                r.getValue(PRICES_HISTORY.PRICE),
+                                r.getValue(PRICES_HISTORY.VOLUME)
                         ));
-
                     }
                 }
-
                 prices.add(new Instant(LocalDateTime.now().minusDays(365), 0, 0));
                 prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
-            }
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+                return prices;
+            });
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
-
-        return prices;
+        return Collections.emptyList();
     }
 
-    public static List<Instant> getAllPrices(Connection connection, Item item) {
-
-        List<Instant> prices = new LinkedList<>();
-
+    public static List<Instant> getAllPrices(DSLContext dsl, Item item) {
         try {
-            String select = "SELECT day FROM prices_history WHERE identifier=? ORDER BY day DESC LIMIT 1;";
+            return dsl.transactionResult(configuration -> {
+                DSLContext ctx = DSL.using(configuration);
+                List<Instant> prices = new LinkedList<>();
 
-            PreparedStatement preparedStatement = connection.prepareStatement(select);
+                var record = ctx.select(PRICES_HISTORY.DAY)
+                        .from(PRICES_HISTORY)
+                        .where(PRICES_HISTORY.IDENTIFIER.eq(item.getIdentifier()))
+                        .orderBy(PRICES_HISTORY.DAY.desc())
+                        .limit(1)
+                        .fetchOne();
 
-            preparedStatement.setString(1, item.getIdentifier());
-
-            ResultSet resultSet = preparedStatement.executeQuery();
-
-            if (!resultSet.next()) {
-
-                prices.add(new Instant(LocalDateTime.now().minusDays(30), 0, 0));
-                prices.add(new Instant(LocalDateTime.now().minusMinutes(5), 0, 0));
-
-                prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
-
-            } else {
-
-                String select288 = "SELECT day, price, volume FROM prices_history WHERE identifier=? ORDER BY day DESC;";
-
-                PreparedStatement preparedStatement288 = connection.prepareStatement(select288);
-
-                preparedStatement288.setString(1, item.getIdentifier());
-
-                ResultSet resultSet1 = preparedStatement288.executeQuery();
-
-                while (resultSet1.next()) {
-
-                    LocalDateTime time = LocalDateTime.of(2023, 1, 1, 1, 1);
-
-                    prices.add(new Instant(
-                            time.plusDays(resultSet1.getInt("day")),
-                            resultSet1.getDouble("price"),
-                            resultSet1.getInt("volume")
-                    ));
+                // noinspection DuplicatedCode
+                if (record == null) {
+                    prices.add(new Instant(LocalDateTime.now().minusDays(30), 0, 0));
+                    prices.add(new Instant(LocalDateTime.now().minusMinutes(5), 0, 0));
+                    prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
+                    return prices;
                 }
 
-                prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
+                var result = ctx.select(PRICES_HISTORY.DAY, PRICES_HISTORY.PRICE, PRICES_HISTORY.VOLUME)
+                        .from(PRICES_HISTORY)
+                        .where(PRICES_HISTORY.IDENTIFIER.eq(item.getIdentifier()))
+                        .orderBy(PRICES_HISTORY.DAY.desc())
+                        .fetch();
 
+                LocalDateTime time = LocalDateTime.of(2023, 1, 1, 1, 1);
+                for (var r : result) {
+                    prices.add(new Instant(
+                            time.plusDays(r.getValue(PRICES_HISTORY.DAY)),
+                            r.getValue(PRICES_HISTORY.PRICE),
+                            r.getValue(PRICES_HISTORY.VOLUME)
+                    ));
+                }
                 prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
-            }
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+                prices.add(new Instant(LocalDateTime.now(), item.getPrice().getValue(), item.getVolume()));
+                return prices;
+            });
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
-
-        return prices;
+        return Collections.emptyList();
     }
 
-    public static Double getPriceOfDay(Connection connection, String identifier, int day) {
-
+    public static Double getPriceOfDay(DSLContext dsl, String identifier, int day) {
         try {
-            String select = "SELECT price FROM prices_history WHERE identifier=? AND day=?;";
+            var record = dsl.select(PRICES_HISTORY.PRICE)
+                    .from(PRICES_HISTORY)
+                    .where(PRICES_HISTORY.IDENTIFIER.eq(identifier))
+                    .and(PRICES_HISTORY.DAY.eq(day))
+                    .fetchOne();
 
-            PreparedStatement preparedStatement = connection.prepareStatement(select);
-
-            preparedStatement.setString(1, identifier);
-            preparedStatement.setInt(2, day);
-
-            ResultSet resultSet = preparedStatement.executeQuery();
-
-            if (!resultSet.next()) return 0.0;
-
-            return resultSet.getDouble("price");
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            if (record != null) {
+                return record.getValue(PRICES_HISTORY.PRICE);
+            }
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
+        return 0.0;
     }
 
 }

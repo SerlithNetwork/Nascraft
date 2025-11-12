@@ -1,91 +1,74 @@
 package me.bounser.nascraft.database.commands;
 
+import me.bounser.nascraft.Nascraft;
 import me.bounser.nascraft.config.Config;
 import me.bounser.nascraft.database.commands.resources.NormalisedDate;
 import me.bounser.nascraft.discord.alerts.DiscordAlerts;
 import me.bounser.nascraft.market.unit.Item;
+import org.jooq.DSLContext;
+import org.jooq.exception.DataAccessException;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import static me.biquaternions.nascraft.schema.public_.Tables.ALERTS;
 
 public class Alerts {
 
-    public static void addAlert(Connection connection, String userid, Item item, double price) {
-
+    public static void addAlert(DSLContext dsl, String userid, Item item, double price) {
         try {
-            String sql = "INSERT INTO alerts (day, userid, identifier, price) VALUES (?, ?, ?, ?);";
-
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setInt(1, NormalisedDate.getDays());
-            prep.setString(2, userid);
-            prep.setString(3, item.getIdentifier());
-            prep.setDouble(4, price);
-            prep.executeUpdate();
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            dsl.insertInto(ALERTS)
+                    .set(ALERTS.DAY, NormalisedDate.getDays())
+                    .set(ALERTS.USERID, userid)
+                    .set(ALERTS.IDENTIFIER, item.getIdentifier())
+                    .set(ALERTS.PRICE, price)
+                    .execute();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static void removeAlert(Connection connection, String userid, Item item) {
-
+    public static void removeAlert(DSLContext dsl, String userid, Item item) {
         try {
-            String sql = "DELETE FROM alerts WHERE userid = ? AND identifier = ?;";
-
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, userid);
-            prep.setString(2, item.getIdentifier());
-            prep.executeUpdate();
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            dsl.deleteFrom(ALERTS)
+                    .where(ALERTS.USERID.eq(userid))
+                    .and(ALERTS.IDENTIFIER.eq(item.getIdentifier()))
+                    .execute();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static void retrieveAlerts(Connection connection) {
-
+    public static void retrieveAlerts(DSLContext dsl) {
         try {
-            String sql = "SELECT userid, identifier, price FROM alerts;";
-            PreparedStatement prep = connection.prepareStatement(sql);
-            ResultSet resultSet = prep.executeQuery();
+            var result = dsl.select(ALERTS.USERID, ALERTS.IDENTIFIER, ALERTS.PRICE)
+                    .from(ALERTS)
+                    .fetch();
 
-            while (resultSet.next())
-                DiscordAlerts.getInstance().setAlert(resultSet.getString("userid"), resultSet.getString("identifier"), resultSet.getDouble("price"));
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            for (var record : result) {
+                DiscordAlerts.getInstance().setAlert(record.getValue(ALERTS.USERID), record.getValue(ALERTS.IDENTIFIER), record.getValue(ALERTS.PRICE));
+            }
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static void removeAllAlerts(Connection connection, String userId) {
-
+    public static void removeAllAlerts(DSLContext dsl, String userId) {
         try {
-            String sql = "DELETE FROM alerts WHERE userid=?";
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, userId);
-            prep.executeUpdate();
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            dsl.deleteFrom(ALERTS)
+                    .where(ALERTS.USERID.eq(userId))
+                    .execute();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static void purgeAlerts(Connection connection) {
-
+    public static void purgeAlerts(DSLContext dsl) {
         int expiration = Config.getInstance().getAlertsDaysUntilExpired();
         int days = NormalisedDate.getDays();
-
         try {
-            String sql = "DELETE FROM alerts WHERE day < ?;";
-
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setInt(1, days - expiration);
-            prep.executeUpdate();
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            dsl.deleteFrom(ALERTS)
+                    .where(ALERTS.DAY.lessThan(days - expiration))
+                    .execute();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 }

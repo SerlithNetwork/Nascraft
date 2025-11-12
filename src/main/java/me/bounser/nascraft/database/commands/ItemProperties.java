@@ -1,141 +1,99 @@
 package me.bounser.nascraft.database.commands;
 
+import me.bounser.nascraft.Nascraft;
 import me.bounser.nascraft.config.Config;
 import me.bounser.nascraft.market.MarketManager;
 import me.bounser.nascraft.market.unit.Item;
+import me.bounser.nascraft.market.unit.Price;
+import org.jooq.DSLContext;
+import org.jooq.Record;
+import org.jooq.exception.DataAccessException;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import static me.biquaternions.nascraft.schema.public_.Tables.ITEMS;
 
 public class ItemProperties {
 
-    public static void saveItem(Connection connection, Item item) {
-
+    public static void saveItem(DSLContext dsl, Item item) {
+        Price price = item.getPrice();
         try {
-            String sql = "SELECT stock FROM items WHERE identifier=?;";
-
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, item.getIdentifier());
-            ResultSet rs = prep.executeQuery();
-
-            if (rs.next()) {
-                String sqlReplace = "REPLACE INTO items (lastprice, lowest, highest, stock, taxes, identifier) VALUES (?, ?, ?, ?, ?, ?);";
-                PreparedStatement prepReplace = connection.prepareStatement(sqlReplace);
-
-                prepReplace.setDouble(1, item.getPrice().getValue());
-                prepReplace.setDouble(2, item.getPrice().getHistoricalLow());
-                prepReplace.setDouble(3, item.getPrice().getHistoricalHigh());
-                prepReplace.setDouble(4, item.getPrice().getStock());
-                prepReplace.setDouble(5, item.getCollectedTaxes());
-
-                prepReplace.setString(6, item.getIdentifier());
-
-                prepReplace.executeUpdate();
-            } else {
-                String sqlInsert = "INSERT INTO items (lastprice, lowest, highest, stock, taxes, identifier) VALUES (?, ?, ?, ?, ?, ?);";
-                PreparedStatement prepInsert = connection.prepareStatement(sqlInsert);
-
-                prepInsert.setDouble(1, item.getPrice().getValue());
-                prepInsert.setDouble(2, item.getPrice().getHistoricalLow());
-                prepInsert.setDouble(3, item.getPrice().getHistoricalHigh());
-                prepInsert.setDouble(4, item.getPrice().getStock());
-                prepInsert.setDouble(5, item.getCollectedTaxes());
-
-                prepInsert.setString(6, item.getIdentifier());
-
-                prepInsert.executeUpdate();
-            }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            dsl.insertInto(ITEMS)
+                    .set(ITEMS.IDENTIFIER, item.getIdentifier())
+                    .set(ITEMS.LASTPRICE, price.getValue())
+                    .set(ITEMS.LOWEST, price.getHistoricalLow())
+                    .set(ITEMS.HIGHEST, price.getHistoricalHigh())
+                    .set(ITEMS.STOCK, (double) price.getStock())
+                    .set(ITEMS.TAXES, (double) item.getCollectedTaxes())
+                    .onDuplicateKeyUpdate()
+                    .set(ITEMS.LASTPRICE, price.getValue())
+                    .set(ITEMS.LOWEST, price.getHistoricalLow())
+                    .set(ITEMS.HIGHEST, price.getHistoricalHigh())
+                    .set(ITEMS.STOCK, (double) price.getStock())
+                    .set(ITEMS.TAXES, (double) item.getCollectedTaxes())
+                    .execute();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getLogger().warning(e.getMessage());
         }
     }
 
-    public static void retrieveItem(Connection connection, Item item) {
-
+    public static void retrieveItem(DSLContext dsl, Item item) {
         try {
-            String sql = "SELECT lowest, highest, stock, taxes FROM items WHERE identifier=?;";
+            dsl.insertInto(ITEMS)
+                    .set(ITEMS.IDENTIFIER, item.getIdentifier())
+                    .set(ITEMS.LASTPRICE, (double) Config.getInstance().getInitialPrice(item.getIdentifier()))
+                    .set(ITEMS.LOWEST, (double) Config.getInstance().getInitialPrice(item.getIdentifier()))
+                    .set(ITEMS.HIGHEST, (double) Config.getInstance().getInitialPrice(item.getIdentifier()))
+                    .set(ITEMS.STOCK, 0.0)
+                    .set(ITEMS.TAXES, 0.0)
+                    .onDuplicateKeyIgnore()
+                    .execute();
 
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, item.getIdentifier());
-            ResultSet rs = prep.executeQuery();
+            Record record = dsl.selectFrom(ITEMS)
+                    .where(ITEMS.IDENTIFIER.eq(item.getIdentifier()))
+                    .fetchOne();
 
-            if (rs.next()) {
-                item.getPrice().setStock(rs.getInt("stock"));
-                item.getPrice().setHistoricalHigh(rs.getFloat("highest"));
-                item.getPrice().setHistoricalLow(rs.getFloat("lowest"));
-                item.setCollectedTaxes(rs.getFloat("taxes"));
-            } else {
-                String sqlinsert = "INSERT INTO items (identifier, lastprice, lowest, highest, stock, taxes) VALUES (?,?,?,?,?,?);";
-
-                PreparedStatement insertPrep = connection.prepareStatement(sqlinsert);
-                insertPrep.setString(1, item.getIdentifier());
-                insertPrep.setFloat(2, Config.getInstance().getInitialPrice(item.getIdentifier()));
-                insertPrep.setFloat(3, Config.getInstance().getInitialPrice(item.getIdentifier()));
-                insertPrep.setFloat(4, Config.getInstance().getInitialPrice(item.getIdentifier()));
-                insertPrep.setFloat(5, 0);
-                insertPrep.setFloat(6, 0);
-
-                item.getPrice().setStock(0);
-                item.getPrice().setHistoricalHigh(Config.getInstance().getInitialPrice(item.getIdentifier()));
-                item.getPrice().setHistoricalLow(Config.getInstance().getInitialPrice(item.getIdentifier()));
-                item.setCollectedTaxes(0);
-
-                insertPrep.executeUpdate();
+            if (record != null) {
+                item.getPrice().setStock(record.getValue(ITEMS.STOCK).floatValue());
+                item.getPrice().setHistoricalHigh(record.getValue(ITEMS.HIGHEST).floatValue());
+                item.getPrice().setHistoricalLow(record.getValue(ITEMS.LOWEST).floatValue());
+                item.setCollectedTaxes(record.getValue(ITEMS.TAXES).floatValue());
             }
 
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getLogger().warning(e.getMessage());
         }
     }
 
-    public static float retrieveLastPrice(Connection connection, Item item) {
-
+    public static float retrieveLastPrice(DSLContext dsl, Item item) {
         try {
-            String selectSQL = "SELECT lastprice FROM items WHERE identifier = ?;";
-            PreparedStatement preparedStatement = connection.prepareStatement(selectSQL);
+            Record record = dsl.select(ITEMS.LASTPRICE)
+                    .from(ITEMS)
+                    .where(ITEMS.IDENTIFIER.eq(item.getIdentifier()))
+                    .fetchOne();
 
-            preparedStatement.setString(1, item.getIdentifier());
-
-            ResultSet resultSet = preparedStatement.executeQuery();
-
-            if (resultSet.next()) {
-                return resultSet.getFloat("lastprice");
-            } else {
-                return Config.getInstance().getInitialPrice(item.getIdentifier());
+            if (record != null) {
+                return record.getValue(ITEMS.LASTPRICE).floatValue();
             }
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            return Config.getInstance().getInitialPrice(item.getIdentifier());
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getLogger().warning(e.getMessage());
         }
+        return 0.0f;
     }
 
-    public static void retrieveItems(Connection connection) {
-
+    public static void retrieveItems(DSLContext dsl) {
         try {
-            String selectSQL = "SELECT stock, identifier FROM items;";
+            var result = dsl.select(ITEMS.STOCK, ITEMS.IDENTIFIER)
+                    .from(ITEMS)
+                    .fetch();
 
-            PreparedStatement preparedStatement = connection.prepareStatement(selectSQL);
-
-            ResultSet resultSet = preparedStatement.executeQuery();
-
-            while (resultSet.next()) {
-
-                String identifier = resultSet.getString("identifier");
-
-                Item item = MarketManager.getInstance().getItem(identifier);
-
-                if (item == null) continue;
-
-                if (item.isParent()) {
-                    item.getPrice().setStock(resultSet.getFloat("stock"));
+            for (Record record : result) {
+                Item item = MarketManager.getInstance().getItem(record.getValue(ITEMS.IDENTIFIER));
+                if (item != null && item.isParent()) {
+                    item.getPrice().setStock(record.getValue(ITEMS.STOCK).floatValue());
                 }
-
             }
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getLogger().warning(e.getMessage());
         }
     }
 

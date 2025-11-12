@@ -1,194 +1,132 @@
 package me.bounser.nascraft.database.commands;
 
+import me.bounser.nascraft.Nascraft;
 import me.bounser.nascraft.chart.cpi.CPIInstant;
 import me.bounser.nascraft.database.commands.resources.DayInfo;
 import me.bounser.nascraft.database.commands.resources.NormalisedDate;
 import me.bounser.nascraft.market.unit.Item;
 import me.bounser.nascraft.market.unit.stats.Instant;
+import org.jooq.DSLContext;
+import org.jooq.exception.DataAccessException;
+import org.jooq.impl.DSL;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static me.biquaternions.nascraft.schema.public_.Tables.CPI;
+import static me.biquaternions.nascraft.schema.public_.Tables.FLOWS;
+
 public class Statistics {
 
-    public static void saveCPI(Connection connection, float value) {
-
+    public static void saveCPI(DSLContext dsl, float value) {
         try {
-
-            String sql = "SELECT day FROM cpi;";
-
-            PreparedStatement prep = connection.prepareStatement(sql);
-            ResultSet rs = prep.executeQuery();
-
-            int today = NormalisedDate.getDays();
-
-            while (rs.next()) {
-                if (rs.getInt("day") == today) return;
-            }
-
-            String sqlinsert = "INSERT INTO cpi (day, date, value) VALUES (?,?,?);";
-
-            PreparedStatement insertPrep = connection.prepareStatement(sqlinsert);
-            insertPrep.setInt(1, today);
-            insertPrep.setString(2, LocalDateTime.now().toString());
-            insertPrep.setFloat(3,value);
-
-            insertPrep.executeUpdate();
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
-
-    }
-
-    public static List<CPIInstant> getAllCPI(Connection connection) {
-
-        try {
-
-            List<CPIInstant> cpiInstants = new ArrayList<>();
-
-            String sql = "SELECT * FROM cpi;";
-
-            PreparedStatement prep = connection.prepareStatement(sql);
-            ResultSet rs = prep.executeQuery();
-
-            while (rs.next()) {
-                cpiInstants.add(new CPIInstant(rs.getFloat("value"), LocalDateTime.parse(rs.getString("date"))));
-            }
-
-            return cpiInstants;
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            dsl.insertInto(CPI)
+                    .set(CPI.DAY, NormalisedDate.getDays())
+                    .set(CPI.DATE, LocalDate.now().toString())
+                    .set(CPI.VALUE, (double) value)
+                    .onDuplicateKeyIgnore()
+                    .execute();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static List<Instant> getPriceAgainstCPI(Connection connection, Item item) {
-
+    public static List<CPIInstant> getAllCPI(DSLContext dsl) {
+        List<CPIInstant> cpiInstants = new ArrayList<>();
         try {
+            var result = dsl.selectFrom(CPI)
+                    .fetch();
 
-            String query = "SELECT MIN(day) AS min_value FROM cpi;";
-
-            PreparedStatement prep = connection.prepareStatement(query);
-            ResultSet rs = prep.executeQuery();
-
-            int minValue = -1;
-
-            if (rs.next()) {
-                minValue = rs.getInt("min_value");
+            for (var record : result) {
+                cpiInstants.add(new CPIInstant(record.getValue().floatValue(), LocalDateTime.parse(record.getDate())));
             }
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
+        }
+        return cpiInstants;
+    }
 
-            if (minValue == -1) {
-                return Collections.singletonList(new Instant(LocalDateTime.now(), item.getPrice().getValue(), 0));
-            }
+    public static List<Instant> getPriceAgainstCPI(DSLContext dsl, Item item) {
+        try {
+            return dsl.transactionResult(configuration -> {
+                DSLContext ctx = DSL.using(configuration);
+                var record = ctx.select(DSL.min(CPI.DAY))
+                        .from(CPI)
+                        .fetchOne();
 
-            if (NormalisedDate.getDays() - 30 < minValue) {
-                return HistorialData.getMonthPrices(connection, item);
-            }
+                int minValue = -1;
+                if (record != null) {
+                    minValue = record.value1();
+                }
 
-            return HistorialData.getAllPrices(connection, item);
+                if (minValue == -1) {
+                    return Collections.singletonList(new Instant(LocalDateTime.now(), item.getPrice().getValue(), 0));
+                }
 
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+                if (NormalisedDate.getDays() - 30 < minValue) {
+                    return HistorialData.getMonthPrices(ctx, item);
+                }
+                return HistorialData.getAllPrices(ctx, item);
+            });
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
+        }
+        return Collections.emptyList();
+    }
+
+    public static void addTransaction(DSLContext dsl, double newFlow, double effectiveTaxes) {
+        try {
+            dsl.insertInto(FLOWS)
+                    .set(FLOWS.DAY, NormalisedDate.getDays())
+                    .set(FLOWS.FLOW, newFlow)
+                    .set(FLOWS.TAXES, effectiveTaxes)
+                    .set(FLOWS.OPERATIONS, 1)
+                    .onDuplicateKeyUpdate()
+                    .set(FLOWS.FLOW, FLOWS.FLOW.plus(newFlow))
+                    .set(FLOWS.TAXES, FLOWS.TAXES.plus(effectiveTaxes))
+                    .set(FLOWS.OPERATIONS, FLOWS.OPERATIONS.plus(1))
+                    .execute();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static void addTransaction(Connection connection, double newFlow, double effectiveTaxes) {
-
+    public static List<DayInfo> getDayInfos(DSLContext dsl) {
+        List<DayInfo> dayInfos = new ArrayList<>();
         try {
+            var result = dsl.selectFrom(FLOWS)
+                    .fetch();
 
-            String query = "SELECT flow, operations, taxes FROM flows WHERE day=?;";
-
-            PreparedStatement prep = connection.prepareStatement(query);
-            prep.setInt(1, NormalisedDate.getDays());
-            ResultSet rs = prep.executeQuery();
-
-            if (rs.next()) {
-                double flow = rs.getFloat("flow");
-                double taxes = rs.getFloat("taxes");
-                int operations = rs.getInt("operations");
-
-                flow += newFlow;
-                taxes += Math.abs(effectiveTaxes);
-                operations++;
-
-                String sqlreplace = "REPLACE INTO flows(day, flow, taxes, operations) VALUES (?,?,?,?);";
-
-                PreparedStatement replacePrep = connection.prepareStatement(sqlreplace);
-                replacePrep.setInt(1, NormalisedDate.getDays());
-                replacePrep.setDouble(2, flow);
-                replacePrep.setDouble(3, taxes);
-                replacePrep.setInt(4, operations);
-
-                replacePrep.executeUpdate();
-
-            } else {
-
-                String sqlinsert = "INSERT INTO flows (day, flow, taxes, operations) VALUES (?,?,?,?);";
-
-                PreparedStatement insertPrep = connection.prepareStatement(sqlinsert);
-                insertPrep.setInt(1, NormalisedDate.getDays());
-                insertPrep.setDouble(2, newFlow);
-                insertPrep.setDouble(3, effectiveTaxes);
-                insertPrep.setInt(4, 1);
-
-                insertPrep.executeUpdate();
+            for (var record : result) {
+                dayInfos.add(new DayInfo(
+                        record.getDay(),
+                        record.getFlow(),
+                        record.getTaxes()
+                ));
             }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
+        return dayInfos;
     }
 
-    public static List<DayInfo> getDayInfos(Connection connection) {
-
+    public static double getAllTaxesCollected(DSLContext dsl) {
         try {
+            var record = dsl.select(FLOWS.TAXES)
+                    .from(FLOWS)
+                    .orderBy(FLOWS.DAY.desc())
+                    .fetchOne();
 
-            List<DayInfo> dayInfos = new ArrayList<>();
-
-            String query = "SELECT * FROM flows;";
-
-            PreparedStatement prep = connection.prepareStatement(query);
-            ResultSet rs = prep.executeQuery();
-
-            while (rs.next()) {
-                dayInfos.add(
-                        new DayInfo(
-                                rs.getInt("day"),
-                                rs.getDouble("flow"),
-                                rs.getDouble("taxes")
-                        )
-                );
+            if (record != null) {
+                return record.getValue(FLOWS.TAXES);
             }
-
-            return dayInfos;
-
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
-    }
-
-    public static double getAllTaxesCollected(Connection connection) {
-        try {
-            String sql = "SELECT taxes FROM flows ORDER BY day DESC LIMIT 1;";
-
-            PreparedStatement prep = connection.prepareStatement(sql);
-            ResultSet rs = prep.executeQuery();
-
-            if (rs.next())
-                return rs.getDouble("taxes");
-
-            return 0;
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
+        return 0.0;
     }
 
 }

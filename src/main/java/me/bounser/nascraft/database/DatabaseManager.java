@@ -2,9 +2,9 @@ package me.bounser.nascraft.database;
 
 import me.bounser.nascraft.Nascraft;
 import me.bounser.nascraft.config.Config;
+import me.bounser.nascraft.database.h2.H2;
 import me.bounser.nascraft.database.mysql.MySQL;
 import me.bounser.nascraft.database.redis.Redis;
-import me.bounser.nascraft.database.sqlite.SQLite;
 
 public class DatabaseManager {
 
@@ -26,8 +26,9 @@ public class DatabaseManager {
 
         switch (databaseType) {
 
-            case SQLITE:
-                database = SQLite.getInstance(); break;
+            case H2:
+                database = H2.getInstance();
+                break;
 
             case MYSQL:
                 database = new MySQL(
@@ -47,7 +48,8 @@ public class DatabaseManager {
                         Config.getInstance().getRedisPassword(),
                         Config.getInstance().getRedisUsername(),
                         Config.getInstance().getRedisDatabase()
-                ); break;
+                );
+                break;
         }
 
         database.connect();

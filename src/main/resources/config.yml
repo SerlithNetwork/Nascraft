@@ -4,8 +4,8 @@
 language: 'en_US'
 
 database:
-  # Available types: SQLite, MYSQL, REDIS
-  type: 'SQLite'
+  # Available types: H2, MYSQL, REDIS
+  type: 'H2'
 
   # How many days should logs of trades last in the database?
   # With the option 60, all trades older than 60 days will be automatically removed.

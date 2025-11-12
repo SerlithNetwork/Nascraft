@@ -6,7 +6,7 @@ import me.bounser.nascraft.config.Config;
 import me.bounser.nascraft.config.lang.Lang;
 import me.bounser.nascraft.config.lang.Message;
 import me.bounser.nascraft.database.DatabaseManager;
-import me.bounser.nascraft.database.sqlite.SQLite;
+import me.bounser.nascraft.database.h2.H2;
 import me.bounser.nascraft.discord.DiscordBot;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -41,7 +41,7 @@ public class LinkManager {
                 return DiscordSRV.getPlugin().getAccountLinkManager().getDiscordId(uuid);
 
             case NATIVE:
-                return SQLite.getInstance().getUserId(uuid);
+                return H2.getInstance().getUserId(uuid);
 
             default: return null;
         }
@@ -66,7 +66,7 @@ public class LinkManager {
 
                 } else {
 
-                    UUID uuid = SQLite.getInstance().getUUID(userId);
+                    UUID uuid = H2.getInstance().getUUID(userId);
 
                     if (uuid != null) {
                         userToUUID.put(userId, uuid);
@@ -118,7 +118,7 @@ public class LinkManager {
 
             userToUUID.put(String.valueOf(confirmingCodes.get(code)), uuid);
 
-            SQLite.getInstance().saveLink(String.valueOf(confirmingCodes.get(code)), uuid, nickname);
+            H2.getInstance().saveLink(String.valueOf(confirmingCodes.get(code)), uuid, nickname);
 
             if (Config.getInstance().getLogChannelEnabled())
                 DiscordBot.getInstance().sendLinkLog(confirmingCodes.get(code), uuid, nickname, true);
@@ -152,7 +152,7 @@ public class LinkManager {
                 UUID uuid = userToUUID.get(userId);
                 userToUUID.remove(userId);
 
-                DiscordBot.getInstance().sendLinkLog(userId, uuid, SQLite.getInstance().getNickname(userId), false);
+                DiscordBot.getInstance().sendLinkLog(userId, uuid, H2.getInstance().getNickname(userId), false);
 
                 DatabaseManager.get().getDatabase().removeLink(userId);
                 DatabaseManager.get().getDatabase().removeAllAlerts(userId);

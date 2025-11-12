@@ -1,6 +1,6 @@
 package me.bounser.nascraft.market.unit.stats;
 
-import me.bounser.nascraft.database.sqlite.SQLite;
+import me.bounser.nascraft.database.h2.H2;
 import me.bounser.nascraft.market.unit.Item;
 
 import java.time.Duration;
@@ -34,7 +34,7 @@ public class ItemStats {
 
             dataDay.add(dayInstant);
 
-            SQLite.getInstance().saveDayPrice(item, dayInstant);
+            H2.getInstance().saveDayPrice(item, dayInstant);
 
             while (dataDay.size() > 288)  dataDay.remove(0);
 
@@ -45,9 +45,9 @@ public class ItemStats {
                     priceAverage(dataDay),
                     volumeAdder(dataDay));
 
-            SQLite.getInstance().saveMonthPrice(item, bigDayInstant);
+            H2.getInstance().saveMonthPrice(item, bigDayInstant);
 
-            SQLite.getInstance().saveHistoryPrices(item, bigDayInstant);
+            H2.getInstance().saveHistoryPrices(item, bigDayInstant);
         }
     }
 

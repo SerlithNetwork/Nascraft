@@ -1,86 +1,94 @@
 package me.bounser.nascraft.database.commands;
 
+import me.bounser.nascraft.Nascraft;
 import me.bounser.nascraft.database.commands.resources.NormalisedDate;
 import me.bounser.nascraft.portfolio.Portfolio;
 import me.bounser.nascraft.portfolio.PortfoliosManager;
+import org.jooq.DSLContext;
+import org.jooq.exception.DataAccessException;
+import org.jooq.impl.DSL;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.UUID;
 
+import static me.biquaternions.nascraft.schema.public_.Tables.PORTFOLIOS_WORTH;
+
 public class PortfoliosWorth {
 
-    public static void saveOrUpdateWorth(Connection connection, UUID uuid, int day, double worth) {
+    public static void saveOrUpdateWorth(DSLContext dsl, UUID uuid, int day, double worth) {
         try {
-            String sql1 = "SELECT id FROM portfolios_worth WHERE uuid=? AND day=?;";
-            PreparedStatement prep1 = connection.prepareStatement(sql1);
-            prep1.setString(1, uuid.toString());
-            prep1.setInt(2, day);
-            ResultSet resultSet = prep1.executeQuery();
+            dsl.transaction(configuration -> {
+                DSLContext ctx = DSL.using(configuration);
+                var record = ctx.select(PORTFOLIOS_WORTH.ID)
+                        .from(PORTFOLIOS_WORTH)
+                        .where(PORTFOLIOS_WORTH.UUID.eq(uuid.toString()))
+                        .and(PORTFOLIOS_WORTH.DAY.eq(day))
+                        .fetchOne();
 
-            if (resultSet.next()) {
-                String sql2 = "UPDATE portfolios_worth SET worth=? WHERE uuid=? AND day=?;";
-                PreparedStatement prep2 = connection.prepareStatement(sql2);
-                prep2.setDouble(1, worth);
-                prep2.setString(2, uuid.toString());
-                prep2.setInt(3, day);
-                prep2.executeUpdate();
-            } else {
-                String sql2 = "INSERT INTO portfolios_worth (uuid, day, worth) VALUES (?,?,?);";
-                PreparedStatement prep2 = connection.prepareStatement(sql2);
-                prep2.setString(1, uuid.toString());
-                prep2.setInt(2, day);
-                prep2.setDouble(3, worth);
-                prep2.executeUpdate();
-            }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+                if (record != null) {
+                    ctx.update(PORTFOLIOS_WORTH)
+                            .set(PORTFOLIOS_WORTH.WORTH, worth)
+                            .where(PORTFOLIOS_WORTH.UUID.eq(uuid.toString()))
+                            .and(PORTFOLIOS_WORTH.DAY.eq(day))
+                            .execute();
+                } else {
+                    ctx.insertInto(PORTFOLIOS_WORTH)
+                            .set(PORTFOLIOS_WORTH.UUID, uuid.toString())
+                            .set(PORTFOLIOS_WORTH.DAY, day)
+                            .set(PORTFOLIOS_WORTH.WORTH, worth)
+                            .execute();
+                }
+            });
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().error(e.getMessage(), e);
         }
     }
 
-    public static void saveOrUpdateWorthToday(Connection connection, UUID uuid, double worth) {
+    public static void saveOrUpdateWorthToday(DSLContext dsl, UUID uuid, double worth) {
         int today = NormalisedDate.getDays();
-        saveOrUpdateWorth(connection, uuid, today, worth);
+        PortfoliosWorth.saveOrUpdateWorth(dsl, uuid, today, worth);
     }
 
-    public static HashMap<UUID, Portfolio> getTopWorth(Connection connection, int n) {
+    public static HashMap<UUID, Portfolio> getTopWorth(DSLContext dsl, int n) {
         LinkedHashMap<UUID, Portfolio> result = new LinkedHashMap<>();
         try {
-            String sql = "SELECT uuid, worth FROM portfolios_worth WHERE (uuid, day) IN (SELECT uuid, MAX(day) FROM portfolios_worth GROUP BY uuid) ORDER BY worth DESC LIMIT ?;";
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setInt(1, n);
-            ResultSet resultSet = prep.executeQuery();
+            var rs = dsl.select(PORTFOLIOS_WORTH.UUID, PORTFOLIOS_WORTH.WORTH)
+                    .from(PORTFOLIOS_WORTH)
+                    .where(DSL.row(PORTFOLIOS_WORTH.UUID, PORTFOLIOS_WORTH.DAY)
+                            .in(DSL.select(PORTFOLIOS_WORTH.UUID, DSL.max(PORTFOLIOS_WORTH.DAY))
+                                    .from(PORTFOLIOS_WORTH)
+                                    .groupBy(PORTFOLIOS_WORTH.UUID)
+                            ))
+                    .orderBy(PORTFOLIOS_WORTH.WORTH.desc())
+                    .limit(n)
+                    .fetch();
 
-            while (resultSet.next()) {
-                UUID uuid = UUID.fromString(resultSet.getString("uuid"));
+            for (var record : rs) {
+                UUID uuid = UUID.fromString(record.getValue(PORTFOLIOS_WORTH.UUID));
                 result.put(uuid, PortfoliosManager.getInstance().getPortfolio(uuid));
             }
-
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().error(e.getMessage(), e);
         }
         return result;
     }
 
-    public static double getLatestWorth(Connection connection, UUID uuid) {
+    public static double getLatestWorth(DSLContext dsl, UUID uuid) {
         try {
-            String sql = "SELECT worth FROM portfolios_worth WHERE uuid=? ORDER BY day DESC LIMIT 1;";
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, uuid.toString());
-            ResultSet resultSet = prep.executeQuery();
+            var record = dsl.select(PORTFOLIOS_WORTH.WORTH)
+                    .from(PORTFOLIOS_WORTH)
+                    .where(PORTFOLIOS_WORTH.UUID.eq(uuid.toString()))
+                    .orderBy(PORTFOLIOS_WORTH.DAY.desc())
+                    .limit(1)
+                    .fetchOne();
 
-            if (resultSet.next()) {
-                return resultSet.getDouble("worth");
-            } else {
-                return 0;
+            if (record != null) {
+                return record.get(PORTFOLIOS_WORTH.WORTH);
             }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().error(e.getMessage(), e);
         }
+        return 0;
     }
 }

@@ -1,70 +1,57 @@
 package me.bounser.nascraft.database.commands;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import me.bounser.nascraft.Nascraft;
+import org.jooq.DSLContext;
+import org.jooq.exception.DataAccessException;
+
 import java.util.UUID;
+
+import static me.biquaternions.nascraft.schema.public_.Tables.USER_NAMES;
 
 public class UserNames {
 
-    public static String getNameByUUID(Connection connection, UUID uuid) {
+    public static String getNameByUUID(DSLContext dsl, UUID uuid) {
         try {
-            String sql = "SELECT name FROM user_names WHERE uuid=?;";
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, uuid.toString());
-            ResultSet resultSet = prep.executeQuery();
+            var record = dsl.select(USER_NAMES.NAME)
+                    .from(USER_NAMES)
+                    .where(USER_NAMES.UUID.eq(uuid.toString()))
+                    .fetchOne();
 
-            if (resultSet.next()) {
-                return resultSet.getString("name");
-            } else {
-                return null;
+            if (record != null) {
+                return record.get(USER_NAMES.NAME);
             }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
+        }
+        return null;
+    }
+
+    public static void saveOrUpdateNick(DSLContext dsl, UUID uuid, String name) {
+        try {
+            dsl.insertInto(USER_NAMES)
+                    .set(USER_NAMES.UUID, uuid.toString())
+                    .set(USER_NAMES.NAME, name)
+                    .onDuplicateKeyUpdate()
+                    .set(USER_NAMES.NAME, name)
+                    .execute();
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
     }
 
-    public static void saveOrUpdateNick(Connection connection, UUID uuid, String name) {
+    public static UUID getUUIDbyName(DSLContext dsl, String name) {
         try {
-            String sql1 = "SELECT id FROM user_names WHERE uuid=?;";
-            PreparedStatement prep1 = connection.prepareStatement(sql1);
-            prep1.setString(1, uuid.toString());
-            ResultSet resultSet = prep1.executeQuery();
+            var record = dsl.select(USER_NAMES.UUID)
+                    .from(USER_NAMES)
+                    .where(USER_NAMES.NAME.eq(name))
+                    .fetchOne();
 
-            if (resultSet.next()) {
-                String sql2 = "UPDATE user_names SET name=? WHERE uuid=?;";
-                PreparedStatement prep2 = connection.prepareStatement(sql2);
-                prep2.setString(1, name);
-                prep2.setString(2, uuid.toString());
-                prep2.executeUpdate();
-            } else {
-                String sql2 = "INSERT INTO user_names (uuid, name) VALUES (?,?);";
-                PreparedStatement prep2 = connection.prepareStatement(sql2);
-                prep2.setString(1, uuid.toString());
-                prep2.setString(2, name);
-                prep2.executeUpdate();
+            if (record != null) {
+                return UUID.fromString(record.get(USER_NAMES.UUID));
             }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+        } catch (DataAccessException e) {
+            Nascraft.getInstance().getSLF4JLogger().warn(e.getMessage(), e);
         }
-    }
-
-    public static UUID getUUIDbyName(Connection connection, String name) {
-        try {
-            String sql = "SELECT uuid FROM user_names WHERE name=?;";
-            PreparedStatement prep = connection.prepareStatement(sql);
-            prep.setString(1, name);
-            ResultSet resultSet = prep.executeQuery();
-
-            if (resultSet.next()) {
-                String uuidString = resultSet.getString("uuid");
-                return UUID.fromString(uuidString);
-            } else {
-                return null;
-            }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
+        return null;
     }
 }

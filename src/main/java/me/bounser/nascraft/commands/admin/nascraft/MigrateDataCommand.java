@@ -7,7 +7,6 @@ import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
 
 /**
  * Command to migrate data from SQLite to Redis
@@ -36,8 +35,8 @@ public class MigrateDataCommand implements CommandExecutor {
         }
         
         // Check current database type
-        if (Config.getInstance().getDatabaseType() != DatabaseType.SQLITE) {
-            sender.sendMessage(ChatColor.RED + "This command can only be used when the primary database is SQLite.");
+        if (Config.getInstance().getDatabaseType() != DatabaseType.H2) {
+            sender.sendMessage(ChatColor.RED + "This command can only be used when the primary database is H2.");
             sender.sendMessage(ChatColor.RED + "Current database type: " + Config.getInstance().getDatabaseType());
             return true;
         }
@@ -48,11 +47,11 @@ public class MigrateDataCommand implements CommandExecutor {
             return true;
         }
         
-        sender.sendMessage(ChatColor.YELLOW + "Starting data migration from SQLite to Redis...");
+        sender.sendMessage(ChatColor.YELLOW + "Starting data migration from H2 to Redis...");
         sender.sendMessage(ChatColor.YELLOW + "This may take some time depending on the size of your database.");
         
         // Start migration process
-        plugin.getDataMigrationManager().migrateFromSQLiteToRedis()
+        plugin.getDataMigrationManager().migrateFromH2ToRedis()
             .thenAccept(success -> {
                 if (success) {
                     sender.sendMessage(ChatColor.GREEN + "Data migration completed successfully!");
