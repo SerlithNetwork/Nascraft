@@ -39,7 +39,7 @@ public class Lang {
 
         if (!language.exists()) {
             Nascraft.getInstance().getLogger().severe("Lang file selected does not exist!");
-            Nascraft.getInstance().getPluginLoader().disablePlugin(Nascraft.getInstance());
+            Nascraft.getInstance().getServer().getPluginManager().disablePlugin(Nascraft.getInstance());
         }
 
         lang = YamlConfiguration.loadConfiguration(language);
@@ -55,7 +55,7 @@ public class Lang {
 
         if (!language.exists()) {
             Nascraft.getInstance().getLogger().severe("Lang file selected does not exist!");
-            Nascraft.getInstance().getPluginLoader().disablePlugin(Nascraft.getInstance());
+            Nascraft.getInstance().getServer().getPluginManager().disablePlugin(Nascraft.getInstance());
         }
 
         lang = YamlConfiguration.loadConfiguration(language);
