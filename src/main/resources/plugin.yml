@@ -9,6 +9,6 @@ folia-supported: true
 
 commands:
   migrate:
-    description: Migrates data from SQLite to Redis
+    description: Migrates data from H2 to Redis
     usage: /migrate
     permission: nascraft.admin

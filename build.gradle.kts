@@ -68,10 +68,10 @@ dependencies {
 
     compileOnly("me.leoko.advancedgui:AdvancedGUI:2.2.8")
     compileOnly("me.clip:placeholderapi:2.11.5")
-    compileOnly("org.xerial:sqlite-jdbc:3.43.0.0")
     compileOnly("net.milkbowl.vault:VaultAPI:1.7")
     compileOnly("com.discordsrv:discordsrv:1.28.0")
     compileOnly("commons-io:commons-io:2.14.0")
+    compileOnly("com.github.retrooper:packetevents-spigot:2.10.1")
 }
 
 val assetsUrl = uri("https://github.com/Owen1212055/mc-assets/archive/refs/heads/main.zip")
