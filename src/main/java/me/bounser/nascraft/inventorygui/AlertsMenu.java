@@ -21,6 +21,7 @@ import org.bukkit.metadata.FixedMetadataValue;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.ConcurrentMap;
 
 public class AlertsMenu implements MenuPage {
 
@@ -100,7 +101,7 @@ public class AlertsMenu implements MenuPage {
 
     public void setAlerts() {
 
-        HashMap<Item, Double> alerts = DiscordAlerts.getInstance().getAlertsOfUUID(player.getUniqueId());
+        ConcurrentMap<Item, Double> alerts = DiscordAlerts.getInstance().getAlertsOfUUID(player.getUniqueId());
 
         if (alerts == null) return;
 

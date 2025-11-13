@@ -136,6 +136,10 @@ public class Config {
         return new File(this.main.getDataFolder(), "categories.yml");
     }
 
+    public int getAsyncThreads() {
+        return this.config.getInt("async.threads", 2);
+    }
+
     public Boolean getWebEnabled() {
         if (this.config.contains("web.enabled")) {
             return this.config.getBoolean("web.enabled");

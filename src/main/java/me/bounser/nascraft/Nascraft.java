@@ -230,6 +230,10 @@ public final class Nascraft extends JavaPlugin {
             TasksManager.getInstance().prepareForShutdown();
         }
 
+        getLogger().info("Terminating asynchronous tasks...");
+        SchedulerManager.getInstance().shutdown();
+        getLogger().info("Done!");
+
         getLogger().info("Saving and closing connection with database...");
         DatabaseManager.get().getDatabase().disconnect();
         getLogger().info("Done!");

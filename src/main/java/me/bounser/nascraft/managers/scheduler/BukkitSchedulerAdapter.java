@@ -1,12 +1,18 @@
 package me.bounser.nascraft.managers.scheduler;
 
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import me.bounser.nascraft.Nascraft;
+import me.bounser.nascraft.config.Config;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Implementation of SchedulerAdapter for traditional Bukkit servers.
@@ -14,23 +20,43 @@ import java.util.function.Consumer;
 public class BukkitSchedulerAdapter implements SchedulerAdapter {
 
     private final Nascraft plugin;
+    private final ExecutorService executor;
 
     public BukkitSchedulerAdapter(Nascraft plugin) {
         this.plugin = plugin;
+
+        Config config = Config.getInstance();
+        this.executor = Executors.newFixedThreadPool(
+                config.getAsyncThreads(),
+                new ThreadFactoryBuilder()
+                        .setNameFormat("Nascraft Task Executor Thread - %d")
+                        .setPriority(Thread.NORM_PRIORITY - 3)
+                        .build()
+        );
     }
 
     @Override
     public CompletableFuture<Void> runAsync(Runnable task) {
-        CompletableFuture<Void> future = new CompletableFuture<>();
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            try {
-                task.run();
-                future.complete(null);
-            } catch (Exception e) {
-                future.completeExceptionally(e);
-            }
-        });
-        return future;
+        final Throwable callerStackTrace = new Throwable();
+        callerStackTrace.setStackTrace(Thread.currentThread().getStackTrace());
+        return CompletableFuture.runAsync(task, this.executor)
+                .exceptionally(ex -> {
+                    Nascraft.getInstance().getSLF4JLogger().error(ex.getMessage(), ex);
+                    Nascraft.getInstance().getSLF4JLogger().error("Scheduler stacktrace", callerStackTrace);
+                    return null;
+                });
+    }
+
+    @Override
+    public <T> CompletableFuture<T> runAsync(Supplier<T> task) {
+        final Throwable callerStackTrace = new Throwable();
+        callerStackTrace.setStackTrace(Thread.currentThread().getStackTrace());
+        return CompletableFuture.supplyAsync(task, this.executor)
+                .exceptionally(ex -> {
+                    Nascraft.getInstance().getSLF4JLogger().error(ex.getMessage(), ex);
+                    Nascraft.getInstance().getSLF4JLogger().error("Scheduler stacktrace", callerStackTrace);
+                    return null;
+                });
     }
 
     @Override
@@ -128,4 +154,15 @@ public class BukkitSchedulerAdapter implements SchedulerAdapter {
     public boolean isFolia() {
         return false;
     }
+
+    @Override
+    public void shutdown() {
+        this.executor.shutdown();
+        try {
+            if (this.executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                this.executor.shutdownNow();
+            }
+        } catch (InterruptedException ignore) {}
+    }
+
 } 

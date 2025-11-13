@@ -5,7 +5,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.HandlerList;
 
-public class TransactionCompletedEvent extends Event {
+public class AsyncTransactionCompletedEvent extends Event {
 
     private final HandlerList HANDLERS_LIST = new HandlerList();
 
@@ -15,7 +15,8 @@ public class TransactionCompletedEvent extends Event {
     private double price;
     private Action action;
 
-    public TransactionCompletedEvent(Player player, Item item, float amount, Action action, double price) {
+    public AsyncTransactionCompletedEvent(Player player, Item item, float amount, Action action, double price) {
+        super(true);
         this.player = player;
         this.item = item;
         this.amount = amount;

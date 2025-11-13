@@ -277,9 +277,11 @@ public class SetLimitOrderMenu implements MenuPage {
                         lore
                 ));
 
-        player.openInventory(gui);
-        player.setMetadata("NascraftMenu", new FixedMetadataValue(Nascraft.getInstance(), "set-limit-order-" + item.getIdentifier()));
-        MarketMenuManager.getInstance().setMenuOfPlayer(player, this);
+        Nascraft.getInstance().getSchedulerAdapter().runGlobal(() -> {
+            player.openInventory(gui);
+            player.setMetadata("NascraftMenu", new FixedMetadataValue(Nascraft.getInstance(), "set-limit-order-" + item.getIdentifier()));
+            MarketMenuManager.getInstance().setMenuOfPlayer(player, this);
+        });
     }
 
     public void nextDuration() {
@@ -291,7 +293,7 @@ public class SetLimitOrderMenu implements MenuPage {
         if (index < durations.size() - 1) {
             duration = durations.get(index + 1);
         } else {
-            duration = durations.get(0);
+            duration = durations.getFirst();
         }
     }
 

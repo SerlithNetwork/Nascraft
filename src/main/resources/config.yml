@@ -3,6 +3,9 @@
 # Language file to use. Available: en_US es_ES it_IT de_DE pt_BR
 language: 'en_US'
 
+async:
+  threads: 4
+
 database:
   # Available types: H2, MYSQL, REDIS
   type: 'H2'

@@ -1,5 +1,6 @@
 package me.bounser.nascraft.managers;
 
+import me.bounser.nascraft.Nascraft;
 import me.bounser.nascraft.config.lang.Lang;
 import me.bounser.nascraft.config.lang.Message;
 import me.bounser.nascraft.market.MarketManager;
@@ -46,15 +47,16 @@ public class InventoryManager {
     }
 
     public static void addItemsToInventory(Player player, ItemStack itemStack, int amount) {
-
-        ItemStack operationItemStack = itemStack.clone();
-
+        final ItemStack operationItemStack = itemStack.clone();
         operationItemStack.setAmount(amount);
 
-        HashMap<Integer, ItemStack> toDrop = player.getInventory().addItem(operationItemStack);
+        Nascraft.getInstance().getSchedulerAdapter().runGlobal(() -> {
+            HashMap<Integer, ItemStack> toDrop = player.getInventory().addItem(operationItemStack);
 
-        for (ItemStack itemStackToDrop: toDrop.values())
-            player.getWorld().dropItem(player.getLocation(), itemStackToDrop);
+            for (ItemStack itemStackToDrop: toDrop.values()) {
+                player.getWorld().dropItem(player.getLocation(), itemStackToDrop);
+            }
+        });
     }
 
     public static boolean containsAtLeast(Player player, ItemStack itemStack, int amount) {
@@ -64,7 +66,7 @@ public class InventoryManager {
     public static void removeItems(Player player, ItemStack itemStack, int amount) {
         ItemStack operation = itemStack.clone();
         operation.setAmount(amount);
-        player.getInventory().removeItem(operation);
+        Nascraft.getInstance().getSchedulerAdapter().runGlobal(() -> player.getInventory().removeItem(operation));
     }
 
 }

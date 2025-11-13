@@ -10,6 +10,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.lang.reflect.Method;
+import java.util.function.Supplier;
 
 public class FoliaSchedulerAdapter implements SchedulerAdapter {
 
@@ -132,6 +133,35 @@ public class FoliaSchedulerAdapter implements SchedulerAdapter {
                     try {
                         task.run();
                         future.complete(null);
+                    } catch (Exception e) {
+                        future.completeExceptionally(e);
+                    }
+                };
+                runAsync.invoke(asyncScheduler, plugin, wrappedTask);
+            }
+        } catch (Exception e) {
+            future.completeExceptionally(e);
+        }
+        return future;
+    }
+
+    @Override
+    public <T> CompletableFuture<T> runAsync(Supplier<T> task) {
+        CompletableFuture<T> future = new CompletableFuture<>();
+        try {
+            if (usesConsumer) {
+                Consumer<Object> consumer = (scheduledTask) -> {
+                    try {
+                        future.complete(task.get());
+                    } catch (Exception e) {
+                        future.completeExceptionally(e);
+                    }
+                };
+                runAsync.invoke(asyncScheduler, plugin, consumer);
+            } else {
+                Runnable wrappedTask = () -> {
+                    try {
+                        future.complete(task.get());
                     } catch (Exception e) {
                         future.completeExceptionally(e);
                     }
@@ -271,4 +301,9 @@ public class FoliaSchedulerAdapter implements SchedulerAdapter {
     public boolean isMainThread() {
         return Bukkit.isPrimaryThread();
     }
+
+    @Override
+    public void shutdown() {
+    }
+
 } 

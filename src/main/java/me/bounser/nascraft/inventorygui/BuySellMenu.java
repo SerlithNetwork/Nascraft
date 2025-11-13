@@ -26,10 +26,11 @@ import org.bukkit.metadata.FixedMetadataValue;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.ConcurrentMap;
 
 import static me.bounser.nascraft.inventorygui.LimitOrdersMenu.getFormattedTime;
 
-public class BuySellMenu implements MenuPage{
+public class BuySellMenu implements MenuPage {
 
     private Inventory gui;
 
@@ -99,7 +100,7 @@ public class BuySellMenu implements MenuPage{
 
         if (config.getAlertsBuySellEnabled()) {
 
-            HashMap<Item, Double> alerts = DiscordAlerts.getInstance().getAlertsOfUUID(player.getUniqueId());
+            ConcurrentMap<Item, Double> alerts = DiscordAlerts.getInstance().getAlertsOfUUID(player.getUniqueId());
 
             if (alerts != null && alerts.containsKey(item)) {
 
@@ -351,7 +352,7 @@ public class BuySellMenu implements MenuPage{
 
         if (config.getAlertsBuySellEnabled()) {
 
-            HashMap<Item, Double> alerts = DiscordAlerts.getInstance().getAlertsOfUUID(player.getUniqueId());
+            ConcurrentMap<Item, Double> alerts = DiscordAlerts.getInstance().getAlertsOfUUID(player.getUniqueId());
 
             if (alerts != null && alerts.containsKey(item)) {
 
@@ -450,9 +451,11 @@ public class BuySellMenu implements MenuPage{
             gui.setItem(sellButtons.get(amount), sellButton);
         }
 
-        player.openInventory(gui);
-        player.setMetadata("NascraftMenu", new FixedMetadataValue(Nascraft.getInstance(), "item-menu-" + item.getIdentifier()));
-        MarketMenuManager.getInstance().setMenuOfPlayer(player, this);
+        Nascraft.getInstance().getSchedulerAdapter().runGlobal(() -> {
+            player.openInventory(gui);
+            player.setMetadata("NascraftMenu", new FixedMetadataValue(Nascraft.getInstance(), "item-menu-" + item.getIdentifier()));
+            MarketMenuManager.getInstance().setMenuOfPlayer(player, this);
+        });
     }
 
 }

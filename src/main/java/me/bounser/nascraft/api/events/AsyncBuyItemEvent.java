@@ -6,7 +6,7 @@ import org.bukkit.event.Cancellable;
 import org.bukkit.event.Event;
 import org.bukkit.event.HandlerList;
 
-public class SellItemEvent extends Event implements Cancellable {
+public class AsyncBuyItemEvent extends Event implements Cancellable {
 
     private final HandlerList HANDLERS_LIST = new HandlerList();
 
@@ -16,11 +16,11 @@ public class SellItemEvent extends Event implements Cancellable {
     private Item item;
     private float amount;
 
-    public SellItemEvent(Player player, Item item, float amount) {
-        cancelled = false;
-
-        this.player = player;
+    public AsyncBuyItemEvent(Player player, Item item, float amount) {
+        super(true);
+        this.cancelled = false;
         this.item = item;
+        this.player = player;
         this.amount = amount;
     }
 
@@ -43,9 +43,7 @@ public class SellItemEvent extends Event implements Cancellable {
         return player;
     }
 
-    public Item getItem() {
-        return item;
-    }
+    public Item getItem() { return item; }
 
     public float getAmount() {
         return amount;

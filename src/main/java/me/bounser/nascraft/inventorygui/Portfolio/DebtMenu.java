@@ -279,8 +279,10 @@ public class DebtMenu implements MenuPage {
                     ));
         }
 
-        player.openInventory(gui);
-        player.setMetadata("NascraftMenu", new FixedMetadataValue(Nascraft.getInstance(), "debt"));
-        MarketMenuManager.getInstance().setMenuOfPlayer(player, this);
+        Nascraft.getInstance().getSchedulerAdapter().runGlobal(() -> {
+            player.openInventory(gui);
+            player.setMetadata("NascraftMenu", new FixedMetadataValue(Nascraft.getInstance(), "debt"));
+            MarketMenuManager.getInstance().setMenuOfPlayer(player, this);
+        });
     }
 }

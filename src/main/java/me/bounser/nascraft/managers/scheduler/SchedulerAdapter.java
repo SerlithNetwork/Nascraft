@@ -5,6 +5,7 @@ import org.bukkit.entity.Entity;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Provides a unified API for scheduling tasks in both Folia and regular Bukkit environments.
@@ -17,6 +18,14 @@ public interface SchedulerAdapter {
      * @return A CompletableFuture that completes when the task is done
      */
     CompletableFuture<Void> runAsync(Runnable task);
+
+    /**
+     * Run a task asynchronously without any region context.
+     *
+     * @param task The task to run
+     * @return A CompletableFuture that completes when the task is done
+     */
+    <T> CompletableFuture<T> runAsync(Supplier<T> task);
     
     /**
      * Run a task on the global region (main thread in Bukkit).
@@ -84,4 +93,12 @@ public interface SchedulerAdapter {
      * @return true if Folia is available, false otherwise
      */
     boolean isFolia();
+
+
+    /**
+     * Shuts the async schedulers down, if there are any.
+     *
+     */
+    void shutdown();
+
 } 

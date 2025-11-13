@@ -167,9 +167,11 @@ public class CategoryMenu implements MenuPage {
             );
         }
 
-        player.openInventory(gui);
-        player.setMetadata("NascraftMenu", new FixedMetadataValue(Nascraft.getInstance(), "category-menu-" + category.getIdentifier()));
-        player.setMetadata("NascraftPage", new FixedMetadataValue(Nascraft.getInstance(), page));
-        MarketMenuManager.getInstance().setMenuOfPlayer(player, this);
+        Nascraft.getInstance().getSchedulerAdapter().runGlobal(() -> {
+            player.openInventory(gui);
+            player.setMetadata("NascraftMenu", new FixedMetadataValue(Nascraft.getInstance(), "category-menu-" + category.getIdentifier()));
+            player.setMetadata("NascraftPage", new FixedMetadataValue(Nascraft.getInstance(), page));
+            MarketMenuManager.getInstance().setMenuOfPlayer(player, this);
+        });
     }
 }

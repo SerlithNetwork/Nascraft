@@ -3,12 +3,12 @@ package me.bounser.nascraft.market.unit;
 import me.bounser.nascraft.Nascraft;
 import me.bounser.nascraft.advancedgui.Images;
 import me.bounser.nascraft.api.events.Action;
-import me.bounser.nascraft.api.events.TransactionCompletedEvent;
+import me.bounser.nascraft.api.events.AsyncTransactionCompletedEvent;
 import me.bounser.nascraft.config.lang.Lang;
 import me.bounser.nascraft.config.lang.Message;
 import me.bounser.nascraft.database.DatabaseManager;
-import me.bounser.nascraft.api.events.BuyItemEvent;
-import me.bounser.nascraft.api.events.SellItemEvent;
+import me.bounser.nascraft.api.events.AsyncBuyItemEvent;
+import me.bounser.nascraft.api.events.AsyncSellItemEvent;
 import me.bounser.nascraft.database.commands.resources.Trade;
 import me.bounser.nascraft.discord.DiscordLog;
 import me.bounser.nascraft.formatter.Formatter;
@@ -188,7 +188,7 @@ public class Item {
             return 0;
         }
 
-        BuyItemEvent event = new BuyItemEvent(player, this, amount);
+        AsyncBuyItemEvent event = new AsyncBuyItemEvent(player, this, amount);
         Bukkit.getPluginManager().callEvent(event);
 
         if (event.isCancelled()) return 0;
@@ -230,7 +230,7 @@ public class Item {
 
         MarketManager.getInstance().addOperation();
 
-        TransactionCompletedEvent transactionEvent = new TransactionCompletedEvent(player, this, amount, Action.BUY, worth);
+        AsyncTransactionCompletedEvent transactionEvent = new AsyncTransactionCompletedEvent(player, this, amount, Action.BUY, worth);
         Bukkit.getPluginManager().callEvent(transactionEvent);
 
         return worth;
@@ -246,7 +246,7 @@ public class Item {
             return 0;
         }
 
-        BuyItemEvent event = new BuyItemEvent(player, this, amount);
+        AsyncBuyItemEvent event = new AsyncBuyItemEvent(player, this, amount);
         Bukkit.getPluginManager().callEvent(event);
 
         if (event.isCancelled()) return 0;
@@ -277,7 +277,7 @@ public class Item {
 
         MarketManager.getInstance().addOperation();
 
-        TransactionCompletedEvent transactionEvent = new TransactionCompletedEvent(player, this, amount, Action.BUY, worth);
+        AsyncTransactionCompletedEvent transactionEvent = new AsyncTransactionCompletedEvent(player, this, amount, Action.BUY, worth);
         Bukkit.getPluginManager().callEvent(transactionEvent);
 
         return worth;
@@ -303,7 +303,7 @@ public class Item {
             return -1;
         }
 
-        SellItemEvent event = new SellItemEvent(player, this, amount);
+        AsyncSellItemEvent event = new AsyncSellItemEvent(player, this, amount);
         Bukkit.getPluginManager().callEvent(event);
 
         if (event.isCancelled()) return -1;
@@ -325,8 +325,7 @@ public class Item {
         double worth = price.getProjectedCost(amount*multiplier, price.getSellTaxMultiplier());
 
         if (player != null && feedback) {
-            operationItemStack.setAmount(amount);
-            player.getInventory().removeItem(operationItemStack);
+            InventoryManager.removeItems(player, operationItemStack, amount);
         }
 
         if (!limitReached) {
@@ -355,7 +354,7 @@ public class Item {
             DiscordLog.getInstance().sendTradeLog(trade);
         MarketManager.getInstance().addOperation();
 
-        TransactionCompletedEvent transactionEvent = new TransactionCompletedEvent(player, this, amount, Action.SELL, worth);
+        AsyncTransactionCompletedEvent transactionEvent = new AsyncTransactionCompletedEvent(player, this, amount, Action.SELL, worth);
         Bukkit.getPluginManager().callEvent(transactionEvent);
 
         return worth;
@@ -371,7 +370,7 @@ public class Item {
             return -1;
         }
 
-        SellItemEvent event = new SellItemEvent(player, this, amount);
+        AsyncSellItemEvent event = new AsyncSellItemEvent(player, this, amount);
         Bukkit.getPluginManager().callEvent(event);
 
         if (event.isCancelled()) return -1;
@@ -408,7 +407,7 @@ public class Item {
             DiscordLog.getInstance().sendTradeLog(trade);
         MarketManager.getInstance().addOperation();
 
-        TransactionCompletedEvent transactionEvent = new TransactionCompletedEvent(player, this, amount, Action.SELL, worth);
+        AsyncTransactionCompletedEvent transactionEvent = new AsyncTransactionCompletedEvent(player, this, amount, Action.SELL, worth);
         Bukkit.getPluginManager().callEvent(transactionEvent);
 
         return worth;

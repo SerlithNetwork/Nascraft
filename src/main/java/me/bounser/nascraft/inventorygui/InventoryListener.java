@@ -10,6 +10,7 @@ import me.bounser.nascraft.config.lang.Message;
 import me.bounser.nascraft.discord.alerts.DiscordAlerts;
 import me.bounser.nascraft.discord.linking.LinkManager;
 import me.bounser.nascraft.inventorygui.MiniChart.InfoMenu;
+import me.bounser.nascraft.managers.AsyncManager;
 import me.bounser.nascraft.managers.DebtManager;
 import me.bounser.nascraft.managers.InventoryManager;
 import me.bounser.nascraft.managers.MoneyManager;
@@ -35,6 +36,7 @@ import org.bukkit.metadata.FixedMetadataValue;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -51,10 +53,12 @@ public class InventoryListener implements Listener {
 
         if (!player.hasPermission("nascraft.market")) return;
 
+        if (AsyncManager.hasTaskRunning(player)) return;
+
         int slot = event.getRawSlot();
         Config config = Config.getInstance();
 
-        String metadata = player.getMetadata("NascraftMenu").get(0).asString();
+        String metadata = player.getMetadata("NascraftMenu").getFirst().asString();
 
         if (metadata.startsWith("category-menu-")) {
 
@@ -65,7 +69,7 @@ public class InventoryListener implements Listener {
             int page;
 
             if (player.hasMetadata("NascraftPage")) {
-                page = player.getMetadata("NascraftPage").get(0).asInt();
+                page = player.getMetadata("NascraftPage").getFirst().asInt();
             } else {
                 page = 0;
             }
@@ -79,7 +83,8 @@ public class InventoryListener implements Listener {
                 } else if (category.getItems().size() > config.getCategoryItemsSlots().size()) {
 
                     player.setMetadata("NascraftPage", new FixedMetadataValue(Nascraft.getInstance(), player.getMetadata("NascraftPage").get(0).asInt() - 1));
-                    MarketMenuManager.getInstance().getMenuFromPlayer(player).update();
+                    MenuPage menu = MarketMenuManager.getInstance().getMenuFromPlayer(player);
+                    AsyncManager.executeAsync(player, menu::update);
 
                 }
                 return;
@@ -88,7 +93,8 @@ public class InventoryListener implements Listener {
             if (category.getItems().size() > config.getCategoryItemsSlots().size() * (1 + page) && slot == config.getCategoryNextSlot()) {
 
                 player.setMetadata("NascraftPage", new FixedMetadataValue(Nascraft.getInstance(), player.getMetadata("NascraftPage").get(0).asInt() + 1));
-                MarketMenuManager.getInstance().getMenuFromPlayer(player).update();
+                MenuPage menu = MarketMenuManager.getInstance().getMenuFromPlayer(player);
+                AsyncManager.executeAsync(player, menu::update);
                 return;
             }
 
@@ -134,9 +140,12 @@ public class InventoryListener implements Listener {
                     if (buyButtons.get(value) == slot)
                         amount = value;
 
-                item.buy(amount, player.getUniqueId(), true);
-
-                MarketMenuManager.getInstance().getMenuFromPlayer(player).update();
+                final int finalAmount = amount;
+                final MenuPage menu = MarketMenuManager.getInstance().getMenuFromPlayer(player);
+                AsyncManager.executeAsync(player, () -> {
+                    item.buy(finalAmount, player.getUniqueId(), true);
+                    menu.update();
+                });
 
                 return;
             }
@@ -151,9 +160,12 @@ public class InventoryListener implements Listener {
                     if (sellButtons.get(value) == slot)
                         amount = value;
 
-                item.sell(amount, player.getUniqueId(), true);
-
-                MarketMenuManager.getInstance().getMenuFromPlayer(player).update();
+                final int finalAmount = amount;
+                final MenuPage menu = MarketMenuManager.getInstance().getMenuFromPlayer(player);
+                AsyncManager.executeAsync(player, () -> {
+                    item.sell(finalAmount, player.getUniqueId(), true);
+                    menu.update();
+                });
 
                 return;
             }
@@ -173,13 +185,14 @@ public class InventoryListener implements Listener {
 
                 if (userId == null) return;
 
-                HashMap<Item, Double> alerts = DiscordAlerts.getInstance().getAlertsOfUUID(player.getUniqueId());
-
+                ConcurrentMap<Item, Double> alerts = DiscordAlerts.getInstance().getAlertsOfUUID(player.getUniqueId());
                 if (alerts != null && alerts.containsKey(item)) {
 
-                    DiscordAlerts.getInstance().removeAlert(userId, item);
-
-                    MarketMenuManager.getInstance().getMenuFromPlayer(player).update();
+                    MenuPage menu = MarketMenuManager.getInstance().getMenuFromPlayer(player);
+                    AsyncManager.executeAsync(player, () -> {
+                        DiscordAlerts.getInstance().removeAlert(userId, item);
+                        menu.update();
+                    });
 
                     return;
                 }
@@ -337,7 +350,7 @@ public class InventoryListener implements Listener {
 
             if (config.getSetLimitOrderMenuTimeSlot() == slot) {
                 menu.nextDuration();
-                menu.update();
+                AsyncManager.executeAsync(player, menu::update);
                 return;
             }
 
@@ -566,7 +579,9 @@ public class InventoryListener implements Listener {
 
                     MenuPage menu = MarketMenuManager.getInstance().getMenuFromPlayer(player);
 
-                    if (menu != null) menu.update();
+                    if (menu != null) {
+                        AsyncManager.executeAsync(player, menu::update);
+                    }
                 }
 
             case "limitorders":
@@ -665,7 +680,9 @@ public class InventoryListener implements Listener {
 
                     MenuPage menu = MarketMenuManager.getInstance().getMenuFromPlayer(player);
 
-                    if (menu != null) menu.update();
+                    if (menu != null) {
+                        AsyncManager.executeAsync(player, menu::update);
+                    }
                 }
 
             case "debt":
@@ -687,13 +704,14 @@ public class InventoryListener implements Listener {
 
                     if (MoneyManager.getInstance().hasEnoughMoney(player, CurrenciesManager.getInstance().getDefaultCurrency(), debt)) {
 
-                        MoneyManager.getInstance().simpleWithdraw(player, CurrenciesManager.getInstance().getDefaultCurrency(), debt);
-                        DebtManager.getInstance().decreaseDebt(player.getUniqueId(), debt);
-
-                        MarketMenuManager.getInstance().getMenuFromPlayer(player).update();
-
-                        Lang.get().message(player, Lang.get().message(Message.PORTFOLIO_DEBT_REPAYED_ALL)
-                                .replace("[AMOUNT]", Formatter.format(CurrenciesManager.getInstance().getDefaultCurrency(), debt, Style.ROUND_BASIC)));
+                        MenuPage menu = MarketMenuManager.getInstance().getMenuFromPlayer(player);
+                        AsyncManager.executeAsync(player, () -> {
+                            MoneyManager.getInstance().simpleWithdraw(player, CurrenciesManager.getInstance().getDefaultCurrency(), debt);
+                            DebtManager.getInstance().decreaseDebt(player.getUniqueId(), debt);
+                            menu.update();
+                            Lang.get().message(player, Lang.get().message(Message.PORTFOLIO_DEBT_REPAYED_ALL)
+                                    .replace("[AMOUNT]", Formatter.format(CurrenciesManager.getInstance().getDefaultCurrency(), debt, Style.ROUND_BASIC)));
+                        });
 
                     } else {
                         Lang.get().message(player, Lang.get().message(Message.NOT_ENOUGH_MONEY));
@@ -755,14 +773,16 @@ public class InventoryListener implements Listener {
                             return;
                         }
 
-                        DebtManager.getInstance().increaseDebt(player.getUniqueId(), loan);
-                        MoneyManager.getInstance().simpleDeposit(player, CurrenciesManager.getInstance().getDefaultCurrency(), loan);
-
-                        MarketMenuManager.getInstance().getMenuFromPlayer(player).update();
-
-                        Lang.get().message(player, Lang.get().message(Message.PORTFOLIO_DEBT_TAKE_LOAN)
-                                .replace("[AMOUNT]", Formatter.format(CurrenciesManager.getInstance().getDefaultCurrency(), loan, Style.ROUND_BASIC))
-                                .replace("[DEBT]", Formatter.format(CurrenciesManager.getInstance().getDefaultCurrency(), loan + debt , Style.ROUND_BASIC)));
+                        final double finalLoan = loan;
+                        MenuPage menu = MarketMenuManager.getInstance().getMenuFromPlayer(player);
+                        AsyncManager.executeAsync(player, () -> {
+                            DebtManager.getInstance().increaseDebt(player.getUniqueId(), finalLoan);
+                            MoneyManager.getInstance().simpleDeposit(player, CurrenciesManager.getInstance().getDefaultCurrency(), finalLoan);
+                            menu.update();
+                            Lang.get().message(player, Lang.get().message(Message.PORTFOLIO_DEBT_TAKE_LOAN)
+                                    .replace("[AMOUNT]", Formatter.format(CurrenciesManager.getInstance().getDefaultCurrency(), finalLoan, Style.ROUND_BASIC))
+                                    .replace("[DEBT]", Formatter.format(CurrenciesManager.getInstance().getDefaultCurrency(), finalLoan + debt , Style.ROUND_BASIC)));
+                        });
 
                     } else {
                         Lang.get().message(player, Lang.get().message(Message.PORTFOLIO_DEBT_NO_COLLATERAL));

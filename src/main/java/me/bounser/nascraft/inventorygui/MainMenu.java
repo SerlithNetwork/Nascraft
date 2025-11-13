@@ -26,6 +26,7 @@ import org.bukkit.metadata.FixedMetadataValue;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.ConcurrentMap;
 
 public class MainMenu implements MenuPage {
 
@@ -62,7 +63,7 @@ public class MainMenu implements MenuPage {
 
             if (linked) {
 
-                HashMap<Item, Double> alerts = DiscordAlerts.getInstance().getAlertsOfUUID(player.getUniqueId());
+                ConcurrentMap<Item, Double> alerts = DiscordAlerts.getInstance().getAlertsOfUUID(player.getUniqueId());
 
                 if (alerts == null || alerts.isEmpty()) {
                     alertLore = alertLore.replace("[ALERTS]", "0");

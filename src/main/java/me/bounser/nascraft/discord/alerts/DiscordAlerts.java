@@ -13,13 +13,15 @@ import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Listener;
 
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 public class DiscordAlerts implements Listener {
 
     // UserId -> (Item, Price)
-    private final HashMap<String, HashMap<Item, Double>> alerts = new HashMap<>();
+    private final ConcurrentMap<String, ConcurrentMap<Item, Double>> alerts = new ConcurrentHashMap<>();
 
     private static DiscordAlerts instance;
 
@@ -43,8 +45,8 @@ public class DiscordAlerts implements Listener {
 
         if (alerts.containsKey(userID) && alerts.get(userID).containsKey(item)) return OperationResult.REPEATED;
 
-        HashMap<Item, Double> content;
-        if (alerts.get(userID) == null) content = new HashMap<>();
+        ConcurrentMap<Item, Double> content;
+        if (alerts.get(userID) == null) content = new ConcurrentHashMap<>();
         else content = alerts.get(userID);
 
         if (price < item.getPrice().getValue()) content.put(item, -price);
@@ -58,22 +60,19 @@ public class DiscordAlerts implements Listener {
 
     public OperationResult removeAlert(String userID, Item item) {
 
-        HashMap<Item, Double> content = alerts.get(userID);
-
+        ConcurrentMap<Item, Double> content = alerts.get(userID);
         if (content == null || !content.containsKey(item)) {
             return OperationResult.NOT_FOUND;
         }
 
         content.remove(item);
         DatabaseManager.get().getDatabase().removeAlert(userID, item);
-
-        alerts.put(userID, content);
         return OperationResult.SUCCESS;
     }
 
     public void updateAlerts() {
 
-        HashMap<String, Item> alertsToRemove = new HashMap<>();
+        ConcurrentMap<String, Item> alertsToRemove = new ConcurrentHashMap<>();
 
         for (String userID : alerts.keySet()) {
 
@@ -100,12 +99,15 @@ public class DiscordAlerts implements Listener {
         }
     }
 
-    public HashMap<String, HashMap<Item, Double>> getAlerts() { return alerts; }
+    public ConcurrentMap<String, ConcurrentMap<Item, Double>> getAlerts() {
+        return alerts;
+    }
 
-    public HashMap<Item, Double> getAlertsOfUUID(UUID uuid) {
-
+    public ConcurrentMap<Item, Double> getAlertsOfUUID(UUID uuid) {
         String userid = LinkManager.getInstance().getUserDiscordID(uuid);
-
+        if (userid == null) {
+            return null;
+        }
         return alerts.get(userid);
     }
 

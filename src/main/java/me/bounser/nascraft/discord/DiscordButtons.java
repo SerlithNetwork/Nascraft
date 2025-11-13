@@ -44,6 +44,7 @@ import java.awt.*;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
 
@@ -71,7 +72,7 @@ public class DiscordButtons extends ListenerAdapter {
         switch (event.getComponentId()) {
 
             case "alerts":
-                HashMap<Item, Double> alerts = DiscordAlerts.getInstance().getAlerts().get(event.getUser().getId());
+                ConcurrentMap<Item, Double> alerts = DiscordAlerts.getInstance().getAlerts().get(event.getUser().getId());
 
                 if (alerts == null || alerts.size() == 0) {
                     event.reply(Lang.get().message(Message.DISCORD_NO_ALERTS_SETUP))
